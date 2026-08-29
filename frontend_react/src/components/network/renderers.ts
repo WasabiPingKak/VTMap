@@ -6,6 +6,7 @@
 import type { CanvasTransform } from "./GraphCanvas";
 import type { GraphLayout, LayoutNode } from "@/types/network";
 import { channelInitial } from "./displayName";
+import { communityColor } from "./communities";
 import { EGO_OUTER_RING } from "./layout";
 import {
   FONT_BASE,
@@ -146,7 +147,23 @@ export function drawNetwork(
   const scale = transform.scale;
   const dotsOnly = scale < DOTS_ONLY_SCALE;
 
-  // ── 邊 ──
+  // ── 社群暈染(僅全圖模式;ego 模式的環狀結構自己說話)──
+  if (!layout.rings && layout.communities) {
+    for (const node of layout.nodes) {
+      const community = layout.communities.get(node.node.channel_id);
+      if (community === undefined) continue;
+      const radius = 110;
+      const gradient = ctx.createRadialGradient(node.x, node.y, 0, node.x, node.y, radius);
+      gradient.addColorStop(0, communityColor(community, 0.07));
+      gradient.addColorStop(1, communityColor(community, 0));
+      ctx.fillStyle = gradient;
+      ctx.beginPath();
+      ctx.arc(node.x, node.y, radius, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  // ── 邊(輕微弧線,交叉時角度自然錯開)──
   for (const { edge, source, target } of layout.edges) {
     let alpha = EDGE_ALPHA;
     if (state.highlightIds !== null) {
@@ -164,9 +181,17 @@ export function drawNetwork(
     ctx.globalAlpha = alpha;
     ctx.strokeStyle = EDGE_COLOR;
     ctx.lineWidth = Math.min(1 + edge.evidence_count * 0.6, 5) / scale;
+
+    const dx = target.x - source.x;
+    const dy = target.y - source.y;
+    const length = Math.hypot(dx, dy) || 1;
+    const bow = Math.min(length * 0.1, 36);
+    const controlX = (source.x + target.x) / 2 - (dy / length) * bow;
+    const controlY = (source.y + target.y) / 2 + (dx / length) * bow;
+
     ctx.beginPath();
     ctx.moveTo(source.x, source.y);
-    ctx.lineTo(target.x, target.y);
+    ctx.quadraticCurveTo(controlX, controlY, target.x, target.y);
     ctx.stroke();
   }
   ctx.globalAlpha = 1;
