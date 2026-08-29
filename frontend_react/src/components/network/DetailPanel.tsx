@@ -2,15 +2,18 @@
  * 聚焦頻道的詳情側板:頻道資訊、關係清單與證據影片。
  */
 
-import { X } from "lucide-react";
+import { Crosshair, X } from "lucide-react";
 import type { NetworkEdge, NetworkGraphData, NetworkNode } from "@/types/network";
 import { channelDisplayName, channelInitial } from "./displayName";
 
 interface DetailPanelProps {
   data: NetworkGraphData;
   focusedId: string;
+  /** 目前的 ego 圓心(null = 一般全圖) */
+  centerId: string | null;
   onClose: () => void;
   onFocusChange: (channelId: string) => void;
+  onSetCenter: (channelId: string | null) => void;
 }
 
 function findNode(data: NetworkGraphData, id: string): NetworkNode | undefined {
@@ -22,9 +25,18 @@ function formatDate(iso: string | null): string {
   return iso.slice(0, 10);
 }
 
-export default function DetailPanel({ data, focusedId, onClose, onFocusChange }: DetailPanelProps) {
+export default function DetailPanel({
+  data,
+  focusedId,
+  centerId,
+  onClose,
+  onFocusChange,
+  onSetCenter,
+}: DetailPanelProps) {
   const channel = findNode(data, focusedId);
   if (!channel) return null;
+
+  const isCenter = centerId === focusedId;
 
   const relations: { other: NetworkNode; edge: NetworkEdge }[] = [];
   for (const edge of data.edges) {
@@ -64,6 +76,17 @@ export default function DetailPanel({ data, focusedId, onClose, onFocusChange }:
           >
             前往 YouTube 頻道
           </a>
+          <button
+            onClick={() => onSetCenter(isCenter ? null : focusedId)}
+            className={`mt-2 flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs border ${
+              isCenter
+                ? "border-amber-500 text-amber-400 hover:bg-amber-500/10"
+                : "border-slate-600 text-slate-200 hover:bg-slate-800"
+            }`}
+          >
+            <Crosshair size={13} />
+            {isCenter ? "取消圓心檢視" : "指定它變成圓心"}
+          </button>
         </div>
         <button
           onClick={onClose}

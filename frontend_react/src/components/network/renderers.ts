@@ -6,6 +6,7 @@
 import type { CanvasTransform } from "./GraphCanvas";
 import type { GraphLayout, LayoutNode } from "@/types/network";
 import { channelInitial } from "./displayName";
+import { EGO_OUTER_RING } from "./layout";
 import {
   FONT_BASE,
   FONT_MIN_SCALE,
@@ -109,12 +110,17 @@ function drawBackground(
   ctx.globalAlpha = 1;
 }
 
+/** ego 模式下,節點是否屬於外圍(與圓心兩層內無關)而需淡化 */
+function isEgoOuter(state: RenderState, id: string): boolean {
+  return state.layout.rings?.get(id) === EGO_OUTER_RING;
+}
+
 function nodeVisual(node: LayoutNode, state: RenderState) {
   const id = node.node.channel_id;
   if (state.focusedId === id) return { color: FOCUSED_COLOR, glow: FOCUSED_GLOW, dim: false };
   if (state.highlightIds?.has(id))
     return { color: NEIGHBOR_COLOR, glow: NEIGHBOR_GLOW, dim: false };
-  const dim = state.highlightIds !== null;
+  const dim = state.highlightIds !== null || isEgoOuter(state, id);
   if (node.node.in_vtmap) return { color: IN_VTMAP_COLOR, glow: IN_VTMAP_GLOW, dim };
   return { color: DISCOVERED_COLOR, glow: DISCOVERED_GLOW, dim };
 }
@@ -150,6 +156,10 @@ export function drawNetwork(
       alpha = onFocus ? EDGE_HIGHLIGHT_ALPHA : EDGE_DIM_ALPHA;
     } else if (state.hoveredId && (edge.a === state.hoveredId || edge.b === state.hoveredId)) {
       alpha = EDGE_HIGHLIGHT_ALPHA;
+    }
+    // ego 模式:任一端在外圍的邊一律淡化
+    if (isEgoOuter(state, edge.a) || isEgoOuter(state, edge.b)) {
+      alpha = Math.min(alpha, EDGE_DIM_ALPHA);
     }
     ctx.globalAlpha = alpha;
     ctx.strokeStyle = EDGE_COLOR;
