@@ -22,6 +22,7 @@ export default function NetworkPage() {
   const graphRef = useRef<NetworkGraphHandle | null>(null);
 
   const focusedId = searchParams.get("focus");
+  const centerId = searchParams.get("center");
 
   const setFocus = useCallback(
     (channelId: string | null) => {
@@ -37,6 +38,23 @@ export default function NetworkPage() {
     },
     [setSearchParams],
   );
+
+  const setCenter = useCallback(
+    (channelId: string | null) => {
+      setSearchParams(
+        (prev) => {
+          const next = new URLSearchParams(prev);
+          if (channelId) next.set("center", channelId);
+          else next.delete("center");
+          return next;
+        },
+        { replace: true },
+      );
+    },
+    [setSearchParams],
+  );
+
+  const centerNode = centerId ? data?.nodes.find((n) => n.channel_id === centerId) : null;
 
   return (
     <MainLayout>
@@ -75,6 +93,7 @@ export default function NetworkPage() {
                 ref={graphRef}
                 data={data}
                 focusedId={focusedId}
+                egoCenterId={centerId}
                 onFocusChange={setFocus}
                 panelInset={focusedId ? PANEL_INSET : 0}
               />
@@ -86,12 +105,26 @@ export default function NetworkPage() {
                 onFitAll={() => graphRef.current?.fitAll()}
               />
               <NetworkLegend />
+              {centerNode && (
+                <div className="absolute top-3 left-1/2 -translate-x-1/2 z-10 flex items-center gap-2 rounded-full bg-amber-500/15 border border-amber-500/60 px-3 py-1 text-sm text-amber-300">
+                  圓心:{centerNode.title || centerNode.handle || centerNode.channel_id}
+                  <button
+                    onClick={() => setCenter(null)}
+                    className="hover:text-amber-100"
+                    aria-label="取消圓心檢視"
+                  >
+                    ✕
+                  </button>
+                </div>
+              )}
               {focusedId && (
                 <DetailPanel
                   data={data}
                   focusedId={focusedId}
+                  centerId={centerId}
                   onClose={() => setFocus(null)}
                   onFocusChange={setFocus}
+                  onSetCenter={setCenter}
                 />
               )}
             </>

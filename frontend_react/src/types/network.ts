@@ -55,4 +55,8 @@ export interface GraphLayout {
   /** channel_id → 相鄰節點 id 集合 */
   neighbors: Map<string, Set<string>>;
   bounds: { minX: number; minY: number; maxX: number; maxY: number };
+  /** ego 模式的圓心;null = 一般全圖模式 */
+  egoCenterId: string | null;
+  /** ego 模式的分環結果(0=圓心、1=直接、2=間接、3=外圍);一般模式為 null */
+  rings: Map<string, number> | null;
 }

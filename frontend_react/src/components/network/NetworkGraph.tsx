@@ -19,6 +19,8 @@ import type { NetworkGraphData } from "@/types/network";
 interface NetworkGraphProps {
   data: NetworkGraphData;
   focusedId: string | null;
+  /** ego 模式的圓心;null = 一般全圖 */
+  egoCenterId: string | null;
   onFocusChange: (channelId: string | null) => void;
   /** 聚焦時側板佔用的右側寬度(px),相機置中時避開 */
   panelInset?: number;
@@ -31,13 +33,16 @@ export interface NetworkGraphHandle {
 }
 
 const NetworkGraph = forwardRef<NetworkGraphHandle, NetworkGraphProps>(function NetworkGraph(
-  { data, focusedId, onFocusChange, panelInset = 0 },
+  { data, focusedId, egoCenterId, onFocusChange, panelInset = 0 },
   ref,
 ) {
   const canvasRef = useRef<GraphCanvasHandle | null>(null);
   const hoveredIdRef = useRef<string | null>(null);
 
-  const layout = useMemo(() => computeLayout(data), [data]);
+  const layout = useMemo(
+    () => computeLayout(data, undefined, egoCenterId ? { centerId: egoCenterId } : undefined),
+    [data, egoCenterId],
+  );
   const starField = useMemo(() => createStarField(), []);
 
   const thumbnails = useMemo(() => layout.nodes.map((n) => n.node.thumbnail), [layout]);
@@ -97,6 +102,30 @@ const NetworkGraph = forwardRef<NetworkGraphHandle, NetworkGraphProps>(function 
     // 等 canvas 完成第一次 resize
     requestAnimationFrame(() => canvasRef.current?.fitBounds(minX, minY, maxX, maxY));
   }, [layout]);
+
+  // ego 圓心切換:相機 fit 到兩環範圍(外圍淡化節點不納入取景)
+  const prevEgoRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (prevEgoRef.current === egoCenterId) return;
+    prevEgoRef.current = egoCenterId;
+    if (!layout.nodes.length) return;
+
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+    for (const n of layout.nodes) {
+      if (layout.rings && (layout.rings.get(n.node.channel_id) ?? 0) >= 3) continue;
+      minX = Math.min(minX, n.x - n.labelHalfWidth);
+      maxX = Math.max(maxX, n.x + n.labelHalfWidth);
+      minY = Math.min(minY, n.y - 22);
+      maxY = Math.max(maxY, n.y + n.labelBottomHeight);
+    }
+    if (!Number.isFinite(minX)) {
+      ({ minX, minY, maxX, maxY } = layout.bounds);
+    }
+    canvasRef.current?.fitBounds(minX, minY, maxX, maxY);
+  }, [egoCenterId, layout]);
 
   // 聚焦變化:相機移過去 + 重繪
   useEffect(() => {
