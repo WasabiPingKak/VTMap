@@ -93,15 +93,16 @@ def enqueue(
     *,
     channel_id: str | None = None,
     video_id: str | None = None,
+    priority: int = 0,
 ) -> None:
     with conn.cursor() as cur:
         cur.execute(
             """
-            insert into crawl_queue (kind, channel_id, video_id)
-            values (%s, %s, %s)
+            insert into crawl_queue (kind, channel_id, video_id, priority)
+            values (%s, %s, %s, %s)
             on conflict do nothing
             """,
-            (kind, channel_id, video_id),
+            (kind, channel_id, video_id, priority),
         )
 
 
@@ -115,7 +116,7 @@ def claim_next_task(conn: psycopg.Connection, kinds: list[str]) -> Task | None:
             where id = (
               select id from crawl_queue
               where status = 'pending' and kind = any(%s)
-              order by id
+              order by priority desc, id
               limit 1
               for update skip locked
             )

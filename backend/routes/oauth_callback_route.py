@@ -7,6 +7,7 @@ from google.cloud import firestore
 
 from services.firestore.auth_service import save_channel_auth
 from services.google_oauth import exchange_code_for_tokens, get_channel_id
+from services.network.queue_service import enqueue_registered_channel
 from utils.jwt_util import JWT_EXP_HOURS, generate_jwt
 from utils.rate_limiter import limiter
 
@@ -78,6 +79,12 @@ def init_oauth_callback_route(app, db: firestore.Client):
 
         save_channel_auth(db, channel_id, refresh_token)
         logging.info(f"✅ 頻道授權成功：{channel_id}")
+
+        # 新頻道高優先排入關係網路爬取佇列;失敗不影響註冊流程
+        try:
+            enqueue_registered_channel(channel_id)
+        except Exception as e:
+            logging.warning(f"⚠️ 頻道 {channel_id} 排入爬取佇列失敗:{e}")
 
         # 🎯 簽出 JWT 並寫入登入 cookie
         jwt_token = generate_jwt(channel_id)
