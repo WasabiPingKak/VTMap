@@ -62,7 +62,7 @@ const SidebarMenu = ({ collapsed, setCollapsed: _setCollapsed, isMobile = false,
     {
       icon: <FaGithub className="w-5 h-5" />,
       name: "GitHub",
-      href: "https://github.com/WasabiPingKak/youtube-channel-info-fetcher",
+      href: "https://github.com/WasabiPingKak/VTMap",
     },
   ];
 

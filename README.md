@@ -1,5 +1,5 @@
-[![CI](https://github.com/WasabiPingKak/youtube-channel-info-fetcher/actions/workflows/ci.yml/badge.svg?branch=develop)](https://github.com/WasabiPingKak/youtube-channel-info-fetcher/actions/workflows/ci.yml)
-[![Coverage](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/WasabiPingKak/619ea827e4b1022e088031c237d7a834/raw/coverage-badge.json)](https://github.com/WasabiPingKak/youtube-channel-info-fetcher/actions/workflows/ci.yml)
+[![CI](https://github.com/WasabiPingKak/VTMap/actions/workflows/ci.yml/badge.svg?branch=develop)](https://github.com/WasabiPingKak/VTMap/actions/workflows/ci.yml)
+[![Coverage](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/WasabiPingKak/619ea827e4b1022e088031c237d7a834/raw/coverage-badge.json)](https://github.com/WasabiPingKak/VTMap/actions/workflows/ci.yml)
 
 # VTMap 頻道旅圖｜Vtuber TrailMap
 
@@ -80,8 +80,8 @@ Browser --> Firebase Hosting (React SPA)
 1. **Clone 專案**
 
    ```bash
-   git clone https://github.com/WasabiPingKak/youtube-channel-info-fetcher.git
-   cd youtube-channel-info-fetcher
+   git clone https://github.com/WasabiPingKak/VTMap.git
+   cd VTMap
    ```
 
 2. **後端**
@@ -202,7 +202,7 @@ python tools/migrate_prod_to_staging.py --full --days 90 --no-sanitize
 ## 專案結構
 
 ```
-youtube-channel-info-fetcher/
+VTMap/
 ├── backend/
 │   ├── app.py                 # APIFlask 入口（Application Factory）
 │   ├── schemas/               # Pydantic request/response schemas
