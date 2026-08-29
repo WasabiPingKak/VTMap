@@ -5,8 +5,14 @@
 
 import type { CanvasTransform } from "./GraphCanvas";
 import type { GraphLayout, LayoutNode } from "@/types/network";
-import { channelDisplayName, channelInitial } from "./displayName";
-import { placeLabels, type LabelItem, type Rect } from "./labelLayout";
+import { channelInitial } from "./displayName";
+import {
+  FONT_BASE,
+  FONT_MIN_SCALE,
+  HEX_RADIUS,
+  LABEL_GAP_RATIO,
+  LINE_HEIGHT_RATIO,
+} from "./labelMetrics";
 import {
   BG_COLOR,
   BG_CENTER,
@@ -27,11 +33,9 @@ import {
   NODE_DIM_ALPHA,
 } from "./colors";
 
-export const HEX_RADIUS = 22;
-/** 縮放小於此值時節點退化為圓點(LOD) */
-const DOTS_ONLY_SCALE = 0.35;
-/** 縮放小於此值時不畫標籤 */
-const LABEL_MIN_SCALE = 0.5;
+export { HEX_RADIUS } from "./labelMetrics";
+/** 縮放小於此值時節點退化為圓點、不畫標籤(LOD) */
+const DOTS_ONLY_SCALE = 0.25;
 
 export interface RenderState {
   layout: GraphLayout;
@@ -210,62 +214,29 @@ export function drawNetwork(
   }
   ctx.globalAlpha = 1;
 
-  // ── 標籤(第二階段:防碰撞放置,擠不下的先不顯示)──
-  if (!dotsOnly && (scale >= LABEL_MIN_SCALE || state.hoveredId)) {
+  // ── 標籤(固定在節點下方置中;layout 已保證互不重疊)──
+  if (!dotsOnly) {
     drawLabels(ctx, scale, state);
   }
   ctx.restore();
 }
 
-function labelPriority(node: LayoutNode, state: RenderState): number {
-  const id = node.node.channel_id;
-  if (state.hoveredId === id) return 1000;
-  if (state.focusedId === id) return 900;
-  if (state.highlightIds?.has(id)) return 500;
-  return state.layout.neighbors.get(id)?.size ?? 0;
-}
-
 function drawLabels(ctx: CanvasRenderingContext2D, scale: number, state: RenderState) {
-  const { layout } = state;
-  const fontSize = Math.max(12 / scale, 11);
+  // scale >= FONT_MIN_SCALE 時螢幕字級恆定,更小時字跟著世界縮小(空間已按最壞情況保留)
+  const fontSize = FONT_BASE / Math.max(scale, FONT_MIN_SCALE);
+  const lineHeight = fontSize * LINE_HEIGHT_RATIO;
   ctx.font = `${fontSize}px sans-serif`;
-
-  const showAll = scale >= LABEL_MIN_SCALE;
-  const items: LabelItem[] = [];
-  for (const node of layout.nodes) {
-    const id = node.node.channel_id;
-    const hovered = state.hoveredId === id;
-    if (!showAll && !hovered) continue;
-    items.push({
-      id,
-      anchorX: node.x,
-      anchorY: node.y,
-      nodeRadius: HEX_RADIUS,
-      width: ctx.measureText(channelDisplayName(node.node)).width,
-      height: fontSize,
-      priority: labelPriority(node, state),
-      alwaysShow: hovered || state.focusedId === id,
-    });
-  }
-
-  const obstacles: Rect[] = layout.nodes.map((n) => ({
-    x: n.x - HEX_RADIUS,
-    y: n.y - HEX_RADIUS,
-    w: HEX_RADIUS * 2,
-    h: HEX_RADIUS * 2,
-  }));
-  const placements = placeLabels(items, obstacles);
-
-  ctx.textAlign = "left";
+  ctx.textAlign = "center";
   ctx.textBaseline = "top";
-  for (const node of layout.nodes) {
-    const id = node.node.channel_id;
-    const rect = placements.get(id);
-    if (!rect) continue;
-    const hovered = state.hoveredId === id;
+
+  for (const node of state.layout.nodes) {
+    const hovered = state.hoveredId === node.node.channel_id;
     const { dim } = nodeVisual(node, state);
     ctx.fillStyle = dim && !hovered ? LABEL_DIM : LABEL_COLOR;
-    ctx.fillText(channelDisplayName(node.node), rect.x, rect.y);
+    const startY = node.y + HEX_RADIUS + fontSize * LABEL_GAP_RATIO;
+    node.labelLines.forEach((line, i) => {
+      ctx.fillText(line, node.x, startY + i * lineHeight);
+    });
   }
 }
 

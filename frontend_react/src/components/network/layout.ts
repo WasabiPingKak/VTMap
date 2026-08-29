@@ -1,6 +1,6 @@
 /**
- * 力導向 layout:載入資料後同步跑完 simulation,輸出固定座標。
- * 圖規模為數百節點,一次算完(< 100ms 等級)比持續動畫更穩定省電。
+ * 力導向 layout:同步跑完 simulation 後,再做矩形分離後處理,
+ * 保證「節點 + 下方標籤」互不重疊(做法參考 VTaxon,邊長允許不均勻)。
  */
 
 import {
@@ -18,12 +18,23 @@ import type {
   LayoutNode,
   NetworkGraphData,
 } from "@/types/network";
+import { channelDisplayName } from "./displayName";
+import {
+  computeLabelMetrics,
+  createDefaultMeasure,
+  HEX_RADIUS,
+  type MeasureFn,
+} from "./labelMetrics";
+import { resolveRectCollisions, type FootprintNode } from "./rectSeparation";
 
 interface SimNode extends SimulationNodeDatum {
   id: string;
 }
 
-export function computeLayout(data: NetworkGraphData): GraphLayout {
+export function computeLayout(data: NetworkGraphData, measure?: MeasureFn): GraphLayout {
+  const measureFn = measure ?? createDefaultMeasure();
+  const metrics = data.nodes.map((n) => computeLabelMetrics(channelDisplayName(n), measureFn));
+
   const simNodes: SimNode[] = data.nodes.map((n) => ({ id: n.channel_id }));
   const nodeIds = new Set(simNodes.map((n) => n.id));
   const simLinks = data.edges
@@ -35,28 +46,42 @@ export function computeLayout(data: NetworkGraphData): GraphLayout {
       "link",
       forceLink(simLinks)
         .id((d) => (d as SimNode).id)
-        // 證據越多的關係拉得越近
-        .distance((l) => 120 - Math.min(40, (l as { evidence: number }).evidence * 8))
-        .strength(0.6),
+        // 證據越多的關係拉得越近;基準距離要容得下上下兩組「節點+標籤」
+        .distance((l) => 170 - Math.min(40, (l as { evidence: number }).evidence * 8))
+        .strength(0.5),
     )
-    .force("charge", forceManyBody().strength(-380))
-    .force("collide", forceCollide(34))
+    .force("charge", forceManyBody().strength(-420))
+    // 用標籤半寬當碰撞半徑,先在 force 階段撐開水平空間
+    .force(
+      "collide",
+      forceCollide((_d, i) => Math.max(metrics[i].halfWidth, HEX_RADIUS) + 12),
+    )
     .force("x", forceX(0).strength(0.05))
     .force("y", forceY(0).strength(0.05))
     .stop();
 
-  // 手動跑完 simulation(次數參考 d3 預設 alpha 衰減至穩定所需)
-  const ticks = Math.ceil(
-    Math.log(sim.alphaMin()) / Math.log(1 - sim.alphaDecay()),
-  );
+  const ticks = Math.ceil(Math.log(sim.alphaMin()) / Math.log(1 - sim.alphaDecay()));
   sim.tick(ticks);
+
+  // 矩形分離:保證「節點 + 下方標籤」零重疊
+  const footprints: FootprintNode[] = simNodes.map((sn, i) => ({
+    x: sn.x ?? 0,
+    y: sn.y ?? 0,
+    halfWidth: metrics[i].halfWidth,
+    topHeight: metrics[i].topHeight,
+    bottomHeight: metrics[i].bottomHeight,
+  }));
+  resolveRectCollisions(footprints);
 
   const byId = new Map<string, LayoutNode>();
   const nodes: LayoutNode[] = data.nodes.map((node, i) => {
     const layoutNode: LayoutNode = {
       node,
-      x: simNodes[i].x ?? 0,
-      y: simNodes[i].y ?? 0,
+      x: footprints[i].x,
+      y: footprints[i].y,
+      labelLines: metrics[i].lines,
+      labelHalfWidth: metrics[i].halfWidth,
+      labelBottomHeight: metrics[i].bottomHeight,
     };
     byId.set(node.channel_id, layoutNode);
     return layoutNode;
@@ -80,10 +105,10 @@ export function computeLayout(data: NetworkGraphData): GraphLayout {
   let maxX = -Infinity;
   let maxY = -Infinity;
   for (const n of nodes) {
-    if (n.x < minX) minX = n.x;
-    if (n.y < minY) minY = n.y;
-    if (n.x > maxX) maxX = n.x;
-    if (n.y > maxY) maxY = n.y;
+    minX = Math.min(minX, n.x - n.labelHalfWidth);
+    maxX = Math.max(maxX, n.x + n.labelHalfWidth);
+    minY = Math.min(minY, n.y - HEX_RADIUS);
+    maxY = Math.max(maxY, n.y + n.labelBottomHeight);
   }
   if (!nodes.length) {
     minX = minY = maxX = maxY = 0;

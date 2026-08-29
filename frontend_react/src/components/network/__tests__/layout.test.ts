@@ -61,4 +61,43 @@ describe("computeLayout", () => {
     });
     expect(layout.edges).toHaveLength(0);
   });
+
+  it("密集圖經 layout 後「節點+下方標籤」零重疊", () => {
+    // 20 個長名字節點全部連到中心,模擬密集 hub
+    const names = [
+      "王顧採 Ch. 六埕順揚宮 主委",
+      "Momiji Ch. 沐沐シノもみじ",
+      "蒼心・翟普瑞薩",
+    ];
+    const nodes = Array.from({ length: 20 }, (_, i) => ({
+      channel_id: `UC_${i}`,
+      title: `${names[i % names.length]}${i}`,
+      handle: null,
+      thumbnail: null,
+      in_vtmap: true,
+    }));
+    const edges = nodes.slice(1).map((n) => ({
+      a: "UC_0",
+      b: n.channel_id,
+      evidence_count: 3,
+      last_seen_video_at: null,
+      evidence: [],
+    }));
+
+    const layout = computeLayout({ nodes, edges });
+
+    for (let i = 0; i < layout.nodes.length; i++) {
+      for (let j = i + 1; j < layout.nodes.length; j++) {
+        const a = layout.nodes[i];
+        const b = layout.nodes[j];
+        const overlapX =
+          Math.min(a.x + a.labelHalfWidth, b.x + b.labelHalfWidth) -
+          Math.max(a.x - a.labelHalfWidth, b.x - b.labelHalfWidth);
+        const overlapY =
+          Math.min(a.y + a.labelBottomHeight, b.y + b.labelBottomHeight) -
+          Math.max(a.y - 22, b.y - 22);
+        expect(overlapX > 0 && overlapY > 0).toBe(false);
+      }
+    }
+  });
 });

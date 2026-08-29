@@ -28,11 +28,17 @@ export interface NetworkGraphData {
   edges: NetworkEdge[];
 }
 
-/** 力導向 layout 計算後的節點位置 */
+/** 力導向 layout 計算後的節點位置與標籤度量 */
 export interface LayoutNode {
   node: NetworkNode;
   x: number;
   y: number;
+  /** 換行後的標籤(永遠顯示在節點下方) */
+  labelLines: string[];
+  /** 佔用矩形半寬(layout 已保證互不重疊) */
+  labelHalfWidth: number;
+  /** 節點中心以下的佔用高度 */
+  labelBottomHeight: number;
 }
 
 export interface LayoutEdge {
