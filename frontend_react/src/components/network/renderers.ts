@@ -6,6 +6,7 @@
 import type { CanvasTransform } from "./GraphCanvas";
 import type { GraphLayout, LayoutNode } from "@/types/network";
 import { channelDisplayName, channelInitial } from "./displayName";
+import { placeLabels, type LabelItem, type Rect } from "./labelLayout";
 import {
   BG_COLOR,
   BG_CENTER,
@@ -206,19 +207,66 @@ export function drawNetwork(
     ctx.strokeStyle = color;
     ctx.lineWidth = hovered ? 3 : 2;
     ctx.stroke();
-
-    // 標籤
-    if (scale >= LABEL_MIN_SCALE || hovered) {
-      const label = channelDisplayName(node.node);
-      ctx.font = `${Math.max(12 / scale, 11)}px sans-serif`;
-      ctx.textAlign = "center";
-      ctx.textBaseline = "top";
-      ctx.fillStyle = dim && !hovered ? LABEL_DIM : LABEL_COLOR;
-      ctx.fillText(label, node.x, node.y + r + 6);
-    }
   }
   ctx.globalAlpha = 1;
+
+  // ── 標籤(第二階段:防碰撞放置,擠不下的先不顯示)──
+  if (!dotsOnly && (scale >= LABEL_MIN_SCALE || state.hoveredId)) {
+    drawLabels(ctx, scale, state);
+  }
   ctx.restore();
+}
+
+function labelPriority(node: LayoutNode, state: RenderState): number {
+  const id = node.node.channel_id;
+  if (state.hoveredId === id) return 1000;
+  if (state.focusedId === id) return 900;
+  if (state.highlightIds?.has(id)) return 500;
+  return state.layout.neighbors.get(id)?.size ?? 0;
+}
+
+function drawLabels(ctx: CanvasRenderingContext2D, scale: number, state: RenderState) {
+  const { layout } = state;
+  const fontSize = Math.max(12 / scale, 11);
+  ctx.font = `${fontSize}px sans-serif`;
+
+  const showAll = scale >= LABEL_MIN_SCALE;
+  const items: LabelItem[] = [];
+  for (const node of layout.nodes) {
+    const id = node.node.channel_id;
+    const hovered = state.hoveredId === id;
+    if (!showAll && !hovered) continue;
+    items.push({
+      id,
+      anchorX: node.x,
+      anchorY: node.y,
+      nodeRadius: HEX_RADIUS,
+      width: ctx.measureText(channelDisplayName(node.node)).width,
+      height: fontSize,
+      priority: labelPriority(node, state),
+      alwaysShow: hovered || state.focusedId === id,
+    });
+  }
+
+  const obstacles: Rect[] = layout.nodes.map((n) => ({
+    x: n.x - HEX_RADIUS,
+    y: n.y - HEX_RADIUS,
+    w: HEX_RADIUS * 2,
+    h: HEX_RADIUS * 2,
+  }));
+  const placements = placeLabels(items, obstacles);
+
+  ctx.textAlign = "left";
+  ctx.textBaseline = "top";
+  for (const node of layout.nodes) {
+    const id = node.node.channel_id;
+    const rect = placements.get(id);
+    if (!rect) continue;
+    const hovered = state.hoveredId === id;
+    const { dim } = nodeVisual(node, state);
+    ctx.fillStyle = dim && !hovered ? LABEL_DIM : LABEL_COLOR;
+    ctx.fillText(channelDisplayName(node.node), rect.x, rect.y);
+  }
 }
 
 /** 命中測試:回傳座標下的節點(六角形以外接圓近似) */
