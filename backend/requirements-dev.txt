@@ -10,6 +10,10 @@ responses>=0.25.0
 mypy>=1.15
 ruff==0.12.0
 
+# 關係網路爬蟲(本機執行,見 crawler/README.md)
+psycopg[binary]>=3.2
+yt-dlp>=2026.8.19
+
 # Type stubs
 types-pytz
 types-cachetools

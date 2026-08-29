@@ -17,8 +17,12 @@ ignore = [
     "E501",  # 行長度由 formatter 處理
 ]
 
+[lint.per-file-ignores]
+# crawler 在本機執行(Python 3.10),不能用 datetime.UTC(3.11+)
+"crawler/**" = ["UP017"]
+
 [lint.isort]
-known-first-party = ["schemas", "services", "routes", "utils", "tests"]
+known-first-party = ["schemas", "services", "routes", "utils", "tests", "crawler"]
 
 [format]
 quote-style = "double"
