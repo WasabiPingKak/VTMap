@@ -1,6 +1,6 @@
-# CLAUDE.md
+# AGENTS.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance to Codex (Codex.ai/code) when working with code in this repository.
 
 ## Project Structure
 
@@ -115,4 +115,4 @@ npm run lint
 
 - **Indent**: Python 4 spaces / Frontend 依 Prettier 預設
 
-通用的語言、行寬、溝通習慣與 Git commit 規則請參閱 `~/.claude/CLAUDE.md`。
+通用的語言、行寬、溝通習慣與 Git commit 規則請參閱 `~/.Codex/AGENTS.md`。
