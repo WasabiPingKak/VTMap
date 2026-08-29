@@ -5,6 +5,7 @@
 
 import type { CanvasTransform } from "./GraphCanvas";
 import type { GraphLayout, LayoutNode } from "@/types/network";
+import { channelDisplayName, channelInitial } from "./displayName";
 import {
   BG_COLOR,
   BG_CENTER,
@@ -169,7 +170,7 @@ export function drawNetwork(
       continue;
     }
 
-    const r = hovered ? HEX_RADIUS * 1.15 : HEX_RADIUS;
+    const r = HEX_RADIUS;
 
     // 光暈
     ctx.save();
@@ -193,12 +194,11 @@ export function drawNetwork(
       hexPath(ctx, node.x, node.y, r - 2);
       ctx.fillStyle = "rgba(255,255,255,0.06)";
       ctx.fill();
-      const initial = (node.node.title || node.node.channel_id).replace(/^@/, "")[0] ?? "?";
       ctx.fillStyle = LABEL_COLOR;
       ctx.font = `${r * 0.9}px sans-serif`;
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
-      ctx.fillText(initial.toUpperCase(), node.x, node.y + 1);
+      ctx.fillText(channelInitial(node.node), node.x, node.y + 1);
     }
 
     // 邊框
@@ -209,7 +209,7 @@ export function drawNetwork(
 
     // 標籤
     if (scale >= LABEL_MIN_SCALE || hovered) {
-      const label = node.node.title || node.node.channel_id;
+      const label = channelDisplayName(node.node);
       ctx.font = `${Math.max(12 / scale, 11)}px sans-serif`;
       ctx.textAlign = "center";
       ctx.textBaseline = "top";

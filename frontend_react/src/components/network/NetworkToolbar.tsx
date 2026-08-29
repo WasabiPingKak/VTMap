@@ -5,6 +5,7 @@
 import { useMemo, useState } from "react";
 import { Maximize2, Minus, Plus, Search } from "lucide-react";
 import type { NetworkGraphData, NetworkNode } from "@/types/network";
+import { channelDisplayName } from "./displayName";
 
 interface NetworkToolbarProps {
   data: NetworkGraphData;
@@ -27,7 +28,12 @@ export default function NetworkToolbar({
     const q = query.trim().toLowerCase();
     if (!q) return [];
     return data.nodes
-      .filter((n) => (n.title || n.channel_id).toLowerCase().includes(q))
+      .filter(
+        (n) =>
+          (n.title ?? "").toLowerCase().includes(q) ||
+          (n.handle ?? "").toLowerCase().includes(q) ||
+          n.channel_id.toLowerCase().includes(q),
+      )
       .slice(0, 8);
   }, [query, data]);
 
@@ -54,7 +60,10 @@ export default function NetworkToolbar({
                     setQuery("");
                   }}
                 >
-                  {n.title || n.channel_id}
+                  {channelDisplayName(n)}
+                  {n.title && n.handle && (
+                    <span className="text-slate-500 ml-1">{n.handle}</span>
+                  )}
                 </button>
               </li>
             ))}

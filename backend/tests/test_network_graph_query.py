@@ -10,8 +10,8 @@ TS = datetime(2026, 8, 28, 12, 0, 0)
 
 def test_build_graph_payload_assembles_nodes_edges_evidence():
     node_rows = [
-        ("UC_a", "頻道A", "https://img/a.jpg", True),
-        ("UC_b", "頻道B", None, False),
+        ("UC_a", "頻道A", "@ch_a", "https://img/a.jpg", True),
+        ("UC_b", None, "@ch_b", None, False),
     ]
     edge_rows = [("UC_a", "UC_b", 2, TS)]
     evidence_rows = [
@@ -25,9 +25,12 @@ def test_build_graph_payload_assembles_nodes_edges_evidence():
     assert payload["nodes"][0] == {
         "channel_id": "UC_a",
         "title": "頻道A",
+        "handle": "@ch_a",
         "thumbnail": "https://img/a.jpg",
         "in_vtmap": True,
     }
+    assert payload["nodes"][1]["title"] is None
+    assert payload["nodes"][1]["handle"] == "@ch_b"
 
     assert len(payload["edges"]) == 1
     edge = payload["edges"][0]

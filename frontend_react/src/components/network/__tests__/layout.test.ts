@@ -4,9 +4,9 @@ import type { NetworkGraphData } from "@/types/network";
 
 const data: NetworkGraphData = {
   nodes: [
-    { channel_id: "UC_a", title: "A", thumbnail: null, in_vtmap: true },
-    { channel_id: "UC_b", title: "B", thumbnail: null, in_vtmap: false },
-    { channel_id: "UC_c", title: "C", thumbnail: null, in_vtmap: true },
+    { channel_id: "UC_a", title: "A", handle: null, thumbnail: null, in_vtmap: true },
+    { channel_id: "UC_b", title: "B", handle: null, thumbnail: null, in_vtmap: false },
+    { channel_id: "UC_c", title: "C", handle: null, thumbnail: null, in_vtmap: true },
   ],
   edges: [
     { a: "UC_a", b: "UC_b", evidence_count: 2, last_seen_video_at: null, evidence: [] },
@@ -56,7 +56,7 @@ describe("computeLayout", () => {
 
   it("忽略指向不存在節點的邊", () => {
     const layout = computeLayout({
-      nodes: [{ channel_id: "UC_a", title: "A", thumbnail: null, in_vtmap: true }],
+      nodes: [{ channel_id: "UC_a", title: "A", handle: null, thumbnail: null, in_vtmap: true }],
       edges: [{ a: "UC_a", b: "UC_ghost", evidence_count: 1, last_seen_video_at: null, evidence: [] }],
     });
     expect(layout.edges).toHaveLength(0);

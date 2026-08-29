@@ -108,7 +108,8 @@ def process_fetch_chat(conn: psycopg.Connection, task: repo.Task) -> None:
         repo.upsert_channel(
             conn,
             author_id,
-            title=author.name,
+            # 聊天室的發言者名稱是 @handle,不是正式頻道名;正式名稱由 enrich-channels 補
+            handle=author.name or None,
             thumbnail_url=author.photo_url,
             source="discovered",
             is_bot=is_bot,

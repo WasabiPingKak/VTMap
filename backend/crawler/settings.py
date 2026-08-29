@@ -35,16 +35,31 @@ KNOWN_BOT_NAMES = {
 }
 
 
-def get_db_url() -> str:
-    """取得 Supabase 連線字串:優先讀環境變數,其次讀 backend/.env.local。"""
-    url = os.getenv("SUPABASE_DB_URL")
-    if url:
-        return url
+def _read_setting(name: str) -> str | None:
+    """讀取設定值:優先環境變數,其次 backend/.env.local。"""
+    value = os.getenv(name)
+    if value:
+        return value
 
     if _ENV_LOCAL.exists():
         for line in _ENV_LOCAL.read_text(encoding="utf-8-sig").splitlines():
             line = line.strip()
-            if line.startswith("SUPABASE_DB_URL="):
+            if line.startswith(f"{name}="):
                 return line.split("=", 1)[1].strip().strip('"').strip("'")
+    return None
 
-    raise RuntimeError("找不到 SUPABASE_DB_URL(環境變數或 backend/.env.local)")
+
+def get_db_url() -> str:
+    """取得 Supabase 連線字串。"""
+    url = _read_setting("SUPABASE_DB_URL")
+    if not url:
+        raise RuntimeError("找不到 SUPABASE_DB_URL(環境變數或 backend/.env.local)")
+    return url
+
+
+def get_youtube_api_key() -> str:
+    """取得 YouTube Data API key(enrich-channels 用)。"""
+    key = _read_setting("YOUTUBE_API_KEY") or _read_setting("API_KEY")
+    if not key:
+        raise RuntimeError("找不到 YOUTUBE_API_KEY(環境變數或 backend/.env.local)")
+    return key

@@ -3,6 +3,7 @@
 export interface NetworkNode {
   channel_id: string;
   title: string | null;
+  handle: string | null;
   thumbnail: string | null;
   in_vtmap: boolean;
 }

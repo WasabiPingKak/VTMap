@@ -4,6 +4,7 @@
 
 import { X } from "lucide-react";
 import type { NetworkEdge, NetworkGraphData, NetworkNode } from "@/types/network";
+import { channelDisplayName, channelInitial } from "./displayName";
 
 interface DetailPanelProps {
   data: NetworkGraphData;
@@ -46,12 +47,13 @@ export default function DetailPanel({ data, focusedId, onClose, onFocusChange }:
           />
         ) : (
           <div className="w-12 h-12 rounded-full bg-slate-800 flex items-center justify-center text-lg">
-            {(channel.title || "?").replace(/^@/, "")[0]}
+            {channelInitial(channel)}
           </div>
         )}
         <div className="flex-1 min-w-0">
-          <div className="font-bold truncate">{channel.title || channel.channel_id}</div>
+          <div className="font-bold truncate">{channelDisplayName(channel)}</div>
           <div className="text-xs text-slate-400 mt-0.5">
+            {channel.title && channel.handle && <span className="mr-2">{channel.handle}</span>}
             {channel.in_vtmap ? "VTMap 收錄頻道" : "尚未收錄"}
           </div>
           <a
@@ -87,12 +89,12 @@ export default function DetailPanel({ data, focusedId, onClose, onFocusChange }:
                 <img src={other.thumbnail} alt="" className="w-8 h-8 rounded-full" />
               ) : (
                 <div className="w-8 h-8 rounded-full bg-slate-800 flex items-center justify-center text-sm">
-                  {(other.title || "?").replace(/^@/, "")[0]}
+                  {channelInitial(other)}
                 </div>
               )}
               <div className="flex-1 min-w-0">
                 <div className="truncate text-sm font-medium">
-                  {other.title || other.channel_id}
+                  {channelDisplayName(other)}
                 </div>
                 <div className="text-xs text-slate-500">
                   出現於 {edge.evidence_count} 部直播
