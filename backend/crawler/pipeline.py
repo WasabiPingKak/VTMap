@@ -15,7 +15,7 @@ import psycopg
 import requests
 
 from crawler import chat_parser, repo, ytdlp
-from crawler.config import (
+from crawler.settings import (
     BACKFILL_VIDEOS_PER_CHANNEL,
     KNOWN_BOT_NAMES,
     MAX_CRAWL_DEPTH,
@@ -109,6 +109,7 @@ def process_fetch_chat(conn: psycopg.Connection, task: repo.Task) -> None:
             conn,
             author_id,
             title=author.name,
+            thumbnail_url=author.photo_url,
             source="discovered",
             is_bot=is_bot,
             crawl_depth=host_depth + 1,
@@ -121,6 +122,7 @@ def process_fetch_chat(conn: psycopg.Connection, task: repo.Task) -> None:
             badge_type=chat_parser.BADGE_MODERATOR,
             message_count=author.message_count,
             video_published_at=result.published_at,
+            video_title=result.title or None,
         )
         if not is_bot:
             repo.enqueue(conn, repo.KIND_CHECK_QUALIFICATION, channel_id=author_id)

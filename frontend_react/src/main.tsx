@@ -30,6 +30,7 @@ import QuickCategoryEditorPage from "./pages/QuickCategoryEditorPage";
 import LiveRedirectPage from "./pages/LiveRedirectPage";
 import DonatePage from "@/pages/DonatePage";
 import ReviewPage from "./pages/ReviewPage";
+import NetworkPage from "./pages/NetworkPage";
 
 import "flag-icons/css/flag-icons.min.css";
 import "./style.css";
@@ -95,6 +96,7 @@ function AppRoutes() {
         <Route path="/live-redirect" element={<LiveRedirectPage />} />
         <Route path="/donate" element={<DonatePage />} />
         <Route path="/review/:channelId/:year" element={<ReviewPage />} />
+        <Route path="/network" element={<NetworkPage />} />
 
         {/* 其他路徑 → redirect 提示 */}
         <Route

@@ -6,7 +6,7 @@ from pathlib import Path
 import psycopg
 from psycopg import sql
 
-from crawler.config import DB_SCHEMA, get_db_url
+from crawler.settings import DB_SCHEMA, get_db_url
 
 logger = logging.getLogger(__name__)
 

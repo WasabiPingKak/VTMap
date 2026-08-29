@@ -150,18 +150,21 @@ def insert_observation(
     badge_type: str,
     message_count: int,
     video_published_at: datetime | None,
+    video_title: str | None = None,
 ) -> None:
     with conn.cursor() as cur:
         cur.execute(
             """
             insert into chat_badge_observations
               (video_id, host_channel_id, author_channel_id, badge_type,
-               message_count, video_published_at)
-            values (%s, %s, %s, %s, %s, %s)
+               message_count, video_published_at, video_title)
+            values (%s, %s, %s, %s, %s, %s, %s)
             on conflict (video_id, author_channel_id, badge_type) do update set
               message_count = excluded.message_count,
               video_published_at = coalesce(excluded.video_published_at,
-                                            chat_badge_observations.video_published_at)
+                                            chat_badge_observations.video_published_at),
+              video_title = coalesce(excluded.video_title,
+                                     chat_badge_observations.video_title)
             """,
             (
                 video_id,
@@ -170,6 +173,7 @@ def insert_observation(
                 badge_type,
                 message_count,
                 video_published_at,
+                video_title,
             ),
         )
 
