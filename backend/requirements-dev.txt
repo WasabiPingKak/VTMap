@@ -1,7 +1,7 @@
 -r requirements.txt
 
 # 測試
-pytest==8.4.2
+pytest==9.0.3
 pytest-cov==7.1.0
 pytest-env==1.1.5
 responses>=0.25.0
