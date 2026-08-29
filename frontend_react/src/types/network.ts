@@ -59,4 +59,6 @@ export interface GraphLayout {
   egoCenterId: string | null;
   /** ego 模式的分環結果(0=圓心、1=直接、2=間接、3=外圍);一般模式為 null */
   rings: Map<string, number> | null;
+  /** Louvain 社群偵測結果:channel_id → 社群編號(依社群大小排序) */
+  communities: Map<string, number> | null;
 }

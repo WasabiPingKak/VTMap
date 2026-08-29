@@ -1,10 +1,12 @@
 /**
- * 力導向 layout:同步跑完 simulation 後,再做矩形分離後處理,
+ * 關係網路 layout,兩種模式共用「矩形分離」後處理,
  * 保證「節點 + 下方標籤」互不重疊(做法參考 VTaxon,邊長允許不均勻)。
  *
+ * 全圖模式:ForceAtlas2(LinLog + 邊權重)——Gephi 生態的標準做法,
+ * 讓關係緊密的社群自然聚攏、群間拉開,搭配 Louvain 社群偵測上色。
+ *
  * ego 模式(指定圓心):以 BFS 分環(圓心=0、直接關係人=1、間接=2、
- * 其餘=3 外圍淡化),用 forceRadial 把各環約束在對應半徑,矩形分離照常
- * 套用,標籤零重疊的保證在 ego 模式同樣成立。
+ * 其餘=3 外圍淡化),用 forceRadial 把各環約束在對應半徑。
  */
 
 import {
@@ -13,16 +15,16 @@ import {
   forceManyBody,
   forceRadial,
   forceSimulation,
-  forceX,
-  forceY,
 } from "d3-force";
 import type { SimulationNodeDatum } from "d3-force";
+import forceAtlas2 from "graphology-layout-forceatlas2";
 import type {
   GraphLayout,
   LayoutEdge,
   LayoutNode,
   NetworkGraphData,
 } from "@/types/network";
+import { buildGraph, detectCommunities } from "./communities";
 import { channelDisplayName } from "./displayName";
 import {
   computeLabelMetrics,
@@ -42,6 +44,9 @@ export interface EgoOptions {
 
 /** 外圍(與圓心兩層內無關)的環編號 */
 export const EGO_OUTER_RING = 3;
+
+/** 全圖模式縮放的目標:有連線的節點對之間的中位數距離 */
+const TARGET_LINKED_DISTANCE = 180;
 
 function buildAdjacency(data: NetworkGraphData): Map<string, Set<string>> {
   const adjacency = new Map<string, Set<string>>();
@@ -100,13 +105,147 @@ function computeRingRadii(
   return radii;
 }
 
-/** 穩定的偽隨機角度(外圍節點用) */
+/** 穩定的偽隨機角度 */
 function hashAngle(id: string): number {
   let hash = 0;
   for (let i = 0; i < id.length; i++) {
     hash = (hash * 31 + id.charCodeAt(i)) | 0;
   }
   return ((hash >>> 0) % 3600) * (Math.PI / 1800);
+}
+
+/** ego 模式:d3-force 分環放射佈局,回傳每個節點的座標(依 data.nodes 順序) */
+function computeEgoPositions(
+  data: NetworkGraphData,
+  centerId: string,
+  rings: Map<string, number>,
+  halfWidthById: Map<string, number>,
+  metrics: { halfWidth: number }[],
+): { x: number; y: number }[] {
+  const adjacency = buildAdjacency(data);
+  const nodeIds = data.nodes.map((n) => n.channel_id);
+  const ringRadii = computeRingRadii(rings, halfWidthById);
+
+  const simNodes: SimNode[] = data.nodes.map((n) => ({ id: n.channel_id }));
+  const nodeIdSet = new Set(nodeIds);
+  const simLinks = data.edges
+    .filter((e) => nodeIdSet.has(e.a) && nodeIdSet.has(e.b))
+    .map((e) => ({ source: e.a, target: e.b }));
+
+  const byRing: string[][] = [[], [], [], []];
+  for (const id of nodeIds) byRing[rings.get(id)!].push(id);
+
+  const angleById = new Map<string, number>();
+  byRing[1].forEach((id, i) => {
+    angleById.set(id, (i / Math.max(byRing[1].length, 1)) * 2 * Math.PI);
+  });
+  for (const id of byRing[2]) {
+    // 靠向第一環父節點的平均角度,減少跨環交叉
+    const parents = [...(adjacency.get(id) ?? [])].filter((p) => rings.get(p) === 1);
+    if (parents.length) {
+      const angles = parents.map((p) => angleById.get(p) ?? 0);
+      angleById.set(id, angles.reduce((s, a) => s + a, 0) / angles.length + hashAngle(id) * 0.05);
+    } else {
+      angleById.set(id, hashAngle(id));
+    }
+  }
+  for (const id of byRing[3]) angleById.set(id, hashAngle(id));
+
+  for (const sn of simNodes) {
+    const ring = rings.get(sn.id)!;
+    if (ring === 0) {
+      sn.fx = 0;
+      sn.fy = 0;
+      continue;
+    }
+    const angle = angleById.get(sn.id) ?? 0;
+    sn.x = Math.cos(angle) * ringRadii[ring];
+    sn.y = Math.sin(angle) * ringRadii[ring];
+  }
+
+  const sim = forceSimulation(simNodes)
+    .force(
+      "link",
+      forceLink(simLinks)
+        .id((d) => (d as SimNode).id)
+        .strength(0.1),
+    )
+    .force("charge", forceManyBody().strength(-220))
+    .force(
+      "collide",
+      forceCollide((_d, i) => Math.max(metrics[i].halfWidth, HEX_RADIUS) + 12),
+    )
+    .force(
+      "radial",
+      forceRadial(
+        (d) => ringRadii[rings.get((d as SimNode).id)!],
+        0,
+        0,
+      ).strength((d) => (rings.get((d as SimNode).id)! >= EGO_OUTER_RING ? 0.5 : 0.9)),
+    )
+    .stop();
+
+  const ticks = Math.ceil(Math.log(sim.alphaMin()) / Math.log(1 - sim.alphaDecay()));
+  sim.tick(ticks);
+
+  return simNodes.map((sn) => ({ x: sn.x ?? 0, y: sn.y ?? 0 }));
+}
+
+/** 全圖模式:ForceAtlas2,社群自然聚攏 */
+function computeGlobalPositions(data: NetworkGraphData): { x: number; y: number }[] {
+  const graph = buildGraph(data);
+  // 固定的初始位置,確保結果可重現
+  data.nodes.forEach((n, i) => {
+    const angle = hashAngle(n.channel_id);
+    const radius = 60 + ((i * 137) % 400);
+    graph.setNodeAttribute(n.channel_id, "x", Math.cos(angle) * radius);
+    graph.setNodeAttribute(n.channel_id, "y", Math.sin(angle) * radius);
+  });
+
+  if (graph.size > 0) {
+    forceAtlas2.assign(graph, {
+      iterations: 400,
+      getEdgeWeight: "weight",
+      settings: {
+        linLogMode: true,
+        // strong gravity:把互不相連的小群往中心收攏,避免孤島飛太遠
+        gravity: 1,
+        strongGravityMode: true,
+        scalingRatio: 6,
+        edgeWeightInfluence: 1,
+        barnesHutOptimize: graph.order > 400,
+      },
+    });
+  }
+
+  const positions = data.nodes.map((n) => ({
+    x: graph.getNodeAttribute(n.channel_id, "x") as number,
+    y: graph.getNodeAttribute(n.channel_id, "y") as number,
+  }));
+
+  // FA2 輸出尺度不固定,縮放到「有連線的節點對中位數距離 = 目標值」
+  const indexById = new Map(data.nodes.map((n, i) => [n.channel_id, i]));
+  const linkedDistances: number[] = [];
+  for (const edge of data.edges) {
+    const a = indexById.get(edge.a);
+    const b = indexById.get(edge.b);
+    if (a === undefined || b === undefined) continue;
+    linkedDistances.push(
+      Math.hypot(positions[a].x - positions[b].x, positions[a].y - positions[b].y),
+    );
+  }
+  if (linkedDistances.length) {
+    linkedDistances.sort((x, y) => x - y);
+    const median = linkedDistances[Math.floor(linkedDistances.length / 2)];
+    if (median > 0) {
+      const scale = Math.min(Math.max(TARGET_LINKED_DISTANCE / median, 0.3), 20);
+      for (const p of positions) {
+        p.x *= scale;
+        p.y *= scale;
+      }
+    }
+  }
+  return positions;
 }
 
 export function computeLayout(
@@ -116,93 +255,23 @@ export function computeLayout(
 ): GraphLayout {
   const measureFn = measure ?? createDefaultMeasure();
   const metrics = data.nodes.map((n) => computeLabelMetrics(channelDisplayName(n), measureFn));
-  const halfWidthById = new Map(
-    data.nodes.map((n, i) => [n.channel_id, metrics[i].halfWidth]),
-  );
+  const halfWidthById = new Map(data.nodes.map((n, i) => [n.channel_id, metrics[i].halfWidth]));
 
-  const adjacency = buildAdjacency(data);
   const nodeIds = data.nodes.map((n) => n.channel_id);
   const egoActive = Boolean(ego && nodeIds.includes(ego.centerId));
-  const rings = egoActive ? assignRings(ego!.centerId, nodeIds, adjacency) : null;
-  const ringRadii = rings ? computeRingRadii(rings, halfWidthById) : null;
+  const rings = egoActive
+    ? assignRings(ego!.centerId, nodeIds, buildAdjacency(data))
+    : null;
+  const communities = data.nodes.length ? detectCommunities(data) : null;
 
-  const simNodes: SimNode[] = data.nodes.map((n) => ({ id: n.channel_id }));
-  const nodeIdSet = new Set(nodeIds);
-  const simLinks = data.edges
-    .filter((e) => nodeIdSet.has(e.a) && nodeIdSet.has(e.b))
-    .map((e) => ({ source: e.a, target: e.b, evidence: e.evidence_count }));
-
-  // ego 模式:預先把節點放在目標環上(圓心固定於原點)
-  if (rings && ringRadii) {
-    const byRing: string[][] = [[], [], [], []];
-    for (const id of nodeIds) byRing[rings.get(id)!].push(id);
-
-    const angleById = new Map<string, number>();
-    byRing[1].forEach((id, i) => {
-      angleById.set(id, (i / Math.max(byRing[1].length, 1)) * 2 * Math.PI);
-    });
-    for (const id of byRing[2]) {
-      // 靠向第一環父節點的平均角度,減少跨環交叉
-      const parents = [...(adjacency.get(id) ?? [])].filter((p) => rings.get(p) === 1);
-      if (parents.length) {
-        const angles = parents.map((p) => angleById.get(p) ?? 0);
-        angleById.set(id, angles.reduce((s, a) => s + a, 0) / angles.length + hashAngle(id) * 0.05);
-      } else {
-        angleById.set(id, hashAngle(id));
-      }
-    }
-    for (const id of byRing[3]) angleById.set(id, hashAngle(id));
-
-    for (const sn of simNodes) {
-      const ring = rings.get(sn.id)!;
-      if (ring === 0) {
-        sn.fx = 0;
-        sn.fy = 0;
-        continue;
-      }
-      const angle = angleById.get(sn.id) ?? 0;
-      sn.x = Math.cos(angle) * ringRadii[ring];
-      sn.y = Math.sin(angle) * ringRadii[ring];
-    }
-  }
-
-  const sim = forceSimulation(simNodes)
-    .force(
-      "link",
-      forceLink(simLinks)
-        .id((d) => (d as SimNode).id)
-        // 證據越多的關係拉得越近;基準距離要容得下上下兩組「節點+標籤」
-        .distance((l) => 170 - Math.min(40, (l as { evidence: number }).evidence * 8))
-        .strength(egoActive ? 0.1 : 0.5),
-    )
-    .force("charge", forceManyBody().strength(egoActive ? -220 : -420))
-    // 用標籤半寬當碰撞半徑,先在 force 階段撐開水平空間
-    .force(
-      "collide",
-      forceCollide((_d, i) => Math.max(metrics[i].halfWidth, HEX_RADIUS) + 12),
-    );
-
-  if (rings && ringRadii) {
-    sim.force(
-      "radial",
-      forceRadial(
-        (d) => ringRadii[rings.get((d as SimNode).id)!],
-        0,
-        0,
-      ).strength((d) => (rings.get((d as SimNode).id)! >= EGO_OUTER_RING ? 0.5 : 0.9)),
-    );
-  } else {
-    sim.force("x", forceX(0).strength(0.05)).force("y", forceY(0).strength(0.05));
-  }
-  sim.stop();
-
-  const ticks = Math.ceil(Math.log(sim.alphaMin()) / Math.log(1 - sim.alphaDecay()));
-  sim.tick(ticks);
+  const positions = egoActive
+    ? computeEgoPositions(data, ego!.centerId, rings!, halfWidthById, metrics)
+    : computeGlobalPositions(data);
 
   // 矩形分離:保證「節點 + 下方標籤」零重疊
-  const footprints: FootprintNode[] = simNodes.map((sn, i) => ({
-    x: sn.x ?? 0,
-    y: sn.y ?? 0,
+  const footprints: FootprintNode[] = positions.map((p, i) => ({
+    x: p.x,
+    y: p.y,
     halfWidth: metrics[i].halfWidth,
     topHeight: metrics[i].topHeight,
     bottomHeight: metrics[i].bottomHeight,
@@ -210,7 +279,7 @@ export function computeLayout(
   resolveRectCollisions(footprints);
 
   // ego 模式:分離後把圓心平移回原點(平移不影響零重疊)
-  if (rings && egoActive) {
+  if (egoActive) {
     const centerIndex = nodeIds.indexOf(ego!.centerId);
     const dx = footprints[centerIndex].x;
     const dy = footprints[centerIndex].y;
@@ -269,5 +338,6 @@ export function computeLayout(
     bounds: { minX, minY, maxX, maxY },
     egoCenterId: egoActive ? ego!.centerId : null,
     rings,
+    communities,
   };
 }

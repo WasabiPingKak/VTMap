@@ -16,7 +16,7 @@ export const DISCOVERED_COLOR = "#64748b";
 export const DISCOVERED_GLOW = "rgba(100,116,139,0.5)";
 
 export const EDGE_COLOR = "rgba(148,163,184,0.9)";
-export const EDGE_ALPHA = 0.16;
+export const EDGE_ALPHA = 0.1;
 export const EDGE_HIGHLIGHT_ALPHA = 0.75;
 export const EDGE_DIM_ALPHA = 0.05;
 
