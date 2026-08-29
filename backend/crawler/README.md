@@ -21,7 +21,11 @@ python -m crawler add-channel UCxxxx               # 手動加入單一種子
 python -m crawler run                              # 消化佇列直到清空
 python -m crawler run --max-tasks 5 --kinds fetch_chat   # 限量/限類型
 python -m crawler status                           # 佇列與資料統計
+python -m crawler serve --port 5001                # 前端開發用迷你 API server
 ```
+
+前端本機開發:啟動 serve 後,在 `frontend_react/.env.local` 設
+`VITE_NETWORK_API_BASE=http://127.0.0.1:5001`,`/network` 頁即可吃到真資料。
 
 ## 管線流程
 

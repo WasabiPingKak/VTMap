@@ -1,0 +1,235 @@
+/**
+ * 關係網路的 Canvas 繪製:星空背景、邊、六角形頭像節點、標籤。
+ * 六角形節點語彙移植自 VTaxon。
+ */
+
+import type { CanvasTransform } from "./GraphCanvas";
+import type { GraphLayout, LayoutNode } from "@/types/network";
+import {
+  BG_COLOR,
+  BG_CENTER,
+  DISCOVERED_COLOR,
+  DISCOVERED_GLOW,
+  EDGE_ALPHA,
+  EDGE_COLOR,
+  EDGE_DIM_ALPHA,
+  EDGE_HIGHLIGHT_ALPHA,
+  FOCUSED_COLOR,
+  FOCUSED_GLOW,
+  IN_VTMAP_COLOR,
+  IN_VTMAP_GLOW,
+  LABEL_COLOR,
+  LABEL_DIM,
+  NEIGHBOR_COLOR,
+  NEIGHBOR_GLOW,
+  NODE_DIM_ALPHA,
+} from "./colors";
+
+export const HEX_RADIUS = 22;
+/** 縮放小於此值時節點退化為圓點(LOD) */
+const DOTS_ONLY_SCALE = 0.35;
+/** 縮放小於此值時不畫標籤 */
+const LABEL_MIN_SCALE = 0.5;
+
+export interface RenderState {
+  layout: GraphLayout;
+  images: Map<string, HTMLImageElement>;
+  hoveredId: string | null;
+  focusedId: string | null;
+  /** 聚焦節點的鄰居 id(含聚焦節點本身時視為高亮) */
+  highlightIds: Set<string> | null;
+  starField: { x: number; y: number; r: number; alpha: number }[];
+}
+
+export function createStarField(count = 260, spread = 2600) {
+  const stars = [];
+  for (let i = 0; i < count; i++) {
+    stars.push({
+      x: (Math.random() - 0.5) * spread,
+      y: (Math.random() - 0.5) * spread,
+      r: Math.random() * 1.4 + 0.3,
+      alpha: Math.random() * 0.5 + 0.1,
+    });
+  }
+  return stars;
+}
+
+function hexPath(ctx: CanvasRenderingContext2D, x: number, y: number, r: number) {
+  ctx.beginPath();
+  for (let i = 0; i < 6; i++) {
+    const angle = (Math.PI / 3) * i - Math.PI / 2;
+    const px = x + r * Math.cos(angle);
+    const py = y + r * Math.sin(angle);
+    if (i === 0) ctx.moveTo(px, py);
+    else ctx.lineTo(px, py);
+  }
+  ctx.closePath();
+}
+
+function drawBackground(
+  ctx: CanvasRenderingContext2D,
+  transform: CanvasTransform,
+  width: number,
+  height: number,
+  stars: RenderState["starField"],
+) {
+  ctx.fillStyle = BG_COLOR;
+  ctx.fillRect(0, 0, width, height);
+
+  const grad = ctx.createRadialGradient(
+    width / 2,
+    height / 2,
+    0,
+    width / 2,
+    height / 2,
+    Math.max(width, height) * 0.7,
+  );
+  grad.addColorStop(0, BG_CENTER);
+  grad.addColorStop(1, BG_COLOR);
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, width, height);
+
+  // 星空以低速跟隨平移(視差感),不隨縮放改變大小
+  ctx.save();
+  ctx.translate(width / 2 + transform.x * 0.3, height / 2 + transform.y * 0.3);
+  ctx.fillStyle = "#ffffff";
+  for (const s of stars) {
+    ctx.globalAlpha = s.alpha;
+    ctx.beginPath();
+    ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.restore();
+  ctx.globalAlpha = 1;
+}
+
+function nodeVisual(node: LayoutNode, state: RenderState) {
+  const id = node.node.channel_id;
+  if (state.focusedId === id) return { color: FOCUSED_COLOR, glow: FOCUSED_GLOW, dim: false };
+  if (state.highlightIds?.has(id))
+    return { color: NEIGHBOR_COLOR, glow: NEIGHBOR_GLOW, dim: false };
+  const dim = state.highlightIds !== null;
+  if (node.node.in_vtmap) return { color: IN_VTMAP_COLOR, glow: IN_VTMAP_GLOW, dim };
+  return { color: DISCOVERED_COLOR, glow: DISCOVERED_GLOW, dim };
+}
+
+export function drawNetwork(
+  ctx: CanvasRenderingContext2D,
+  transform: CanvasTransform,
+  sizeWidth: number,
+  sizeHeight: number,
+  state: RenderState,
+) {
+  const dpr = window.devicePixelRatio || 1;
+  const width = sizeWidth / dpr;
+  const height = sizeHeight / dpr;
+
+  drawBackground(ctx, transform, width, height, state.starField);
+
+  ctx.save();
+  ctx.translate(transform.x, transform.y);
+  ctx.scale(transform.scale, transform.scale);
+
+  const { layout } = state;
+  const scale = transform.scale;
+  const dotsOnly = scale < DOTS_ONLY_SCALE;
+
+  // ── 邊 ──
+  for (const { edge, source, target } of layout.edges) {
+    let alpha = EDGE_ALPHA;
+    if (state.highlightIds !== null) {
+      const onFocus =
+        state.focusedId !== null &&
+        (edge.a === state.focusedId || edge.b === state.focusedId);
+      alpha = onFocus ? EDGE_HIGHLIGHT_ALPHA : EDGE_DIM_ALPHA;
+    } else if (state.hoveredId && (edge.a === state.hoveredId || edge.b === state.hoveredId)) {
+      alpha = EDGE_HIGHLIGHT_ALPHA;
+    }
+    ctx.globalAlpha = alpha;
+    ctx.strokeStyle = EDGE_COLOR;
+    ctx.lineWidth = Math.min(1 + edge.evidence_count * 0.6, 5) / scale;
+    ctx.beginPath();
+    ctx.moveTo(source.x, source.y);
+    ctx.lineTo(target.x, target.y);
+    ctx.stroke();
+  }
+  ctx.globalAlpha = 1;
+
+  // ── 節點 ──
+  for (const node of layout.nodes) {
+    const { color, glow, dim } = nodeVisual(node, state);
+    const hovered = state.hoveredId === node.node.channel_id;
+    ctx.globalAlpha = dim && !hovered ? NODE_DIM_ALPHA : 1;
+
+    if (dotsOnly) {
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      ctx.arc(node.x, node.y, 6 / Math.max(scale, 0.08), 0, Math.PI * 2);
+      ctx.fill();
+      continue;
+    }
+
+    const r = hovered ? HEX_RADIUS * 1.15 : HEX_RADIUS;
+
+    // 光暈
+    ctx.save();
+    ctx.shadowColor = glow;
+    ctx.shadowBlur = hovered ? 22 : 12;
+    hexPath(ctx, node.x, node.y, r);
+    ctx.fillStyle = BG_CENTER;
+    ctx.fill();
+    ctx.restore();
+
+    // 頭像(六角形裁切)
+    const img = node.node.thumbnail ? state.images.get(node.node.thumbnail) : undefined;
+    if (img) {
+      ctx.save();
+      hexPath(ctx, node.x, node.y, r - 2);
+      ctx.clip();
+      ctx.drawImage(img, node.x - r, node.y - r, r * 2, r * 2);
+      ctx.restore();
+    } else {
+      // 沒頭像:畫首字
+      hexPath(ctx, node.x, node.y, r - 2);
+      ctx.fillStyle = "rgba(255,255,255,0.06)";
+      ctx.fill();
+      const initial = (node.node.title || node.node.channel_id).replace(/^@/, "")[0] ?? "?";
+      ctx.fillStyle = LABEL_COLOR;
+      ctx.font = `${r * 0.9}px sans-serif`;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(initial.toUpperCase(), node.x, node.y + 1);
+    }
+
+    // 邊框
+    hexPath(ctx, node.x, node.y, r);
+    ctx.strokeStyle = color;
+    ctx.lineWidth = hovered ? 3 : 2;
+    ctx.stroke();
+
+    // 標籤
+    if (scale >= LABEL_MIN_SCALE || hovered) {
+      const label = node.node.title || node.node.channel_id;
+      ctx.font = `${Math.max(12 / scale, 11)}px sans-serif`;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "top";
+      ctx.fillStyle = dim && !hovered ? LABEL_DIM : LABEL_COLOR;
+      ctx.fillText(label, node.x, node.y + r + 6);
+    }
+  }
+  ctx.globalAlpha = 1;
+  ctx.restore();
+}
+
+/** 命中測試:回傳座標下的節點(六角形以外接圓近似) */
+export function hitTest(layout: GraphLayout, worldX: number, worldY: number): LayoutNode | null {
+  const r2 = (HEX_RADIUS + 4) ** 2;
+  // 由後往前(繪製順序上層優先)
+  for (let i = layout.nodes.length - 1; i >= 0; i--) {
+    const n = layout.nodes[i];
+    const dx = n.x - worldX;
+    const dy = n.y - worldY;
+    if (dx * dx + dy * dy <= r2) return n;
+  }
+  return null;
+}

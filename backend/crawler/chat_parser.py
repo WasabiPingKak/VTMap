@@ -20,6 +20,7 @@ class AuthorStats:
     name: str
     badges: set[str] = field(default_factory=set)
     message_count: int = 0
+    photo_url: str | None = None
 
 
 @dataclass
@@ -58,6 +59,15 @@ def _classify_badges(renderer: dict) -> set[str]:
     return kinds
 
 
+def _extract_photo_url(renderer: dict) -> str | None:
+    """取發言者頭像 URL(authorPhoto thumbnails 中最大的一張)。"""
+    thumbnails = (renderer.get("authorPhoto") or {}).get("thumbnails") or []
+    if not thumbnails:
+        return None
+    url = thumbnails[-1].get("url")
+    return str(url) if url else None
+
+
 def parse_live_chat_file(path: Path) -> ChatStats:
     stats = ChatStats()
     with path.open(encoding="utf-8") as f:
@@ -80,4 +90,6 @@ def parse_live_chat_file(path: Path) -> ChatStats:
                     record.name = name
                 record.message_count += 1
                 record.badges |= _classify_badges(renderer)
+                if record.photo_url is None:
+                    record.photo_url = _extract_photo_url(renderer)
     return stats

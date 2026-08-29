@@ -6,6 +6,7 @@
   python -m crawler add-channel UCxxxx             # 手動加入單一種子頻道
   python -m crawler run [--max-tasks N] [--kinds fetch_chat ...] [--sleep S]
   python -m crawler status                         # 佇列與資料統計
+  python -m crawler serve [--port 5001]            # 前端開發用迷你 API server
 """
 
 import argparse
@@ -42,7 +43,16 @@ def main() -> None:
 
     sub.add_parser("status")
 
+    p_serve = sub.add_parser("serve")
+    p_serve.add_argument("--port", type=int, default=5001)
+
     args = parser.parse_args()
+
+    if args.command == "serve":
+        from crawler.dev_server import serve
+
+        serve(args.port)
+        return
 
     with get_conn() as conn:
         if args.command == "migrate":

@@ -1,6 +1,6 @@
 import {
   FaTwitter, FaUser, FaGithub,
-  FaChartLine, FaClipboardList, FaTools, FaBug
+  FaChartLine, FaClipboardList, FaTools, FaBug, FaProjectDiagram
 } from "react-icons/fa";
 import { PiAirplaneLandingFill } from "react-icons/pi";
 import { BiSolidDonateHeart } from "react-icons/bi";
@@ -35,6 +35,11 @@ const SidebarMenu = ({ collapsed, setCollapsed: _setCollapsed, isMobile = false,
       label: "檢視所有頻道",
       icon: <FaUser className="w-5 h-5" />,
       to: "/channels",
+    },
+    {
+      label: "關係網路",
+      icon: <FaProjectDiagram className="w-5 h-5" />,
+      to: "/network",
     },
     {
       label: "分類總表｜遊戲",
