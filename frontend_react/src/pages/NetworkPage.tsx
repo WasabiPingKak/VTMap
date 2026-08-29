@@ -3,17 +3,21 @@
  */
 
 import { useCallback, useRef } from "react";
-import { useSearchParams } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
+import { FaClipboardList } from "react-icons/fa";
 import MainLayout from "../components/layout/MainLayout";
 import NetworkGraph, { type NetworkGraphHandle } from "@/components/network/NetworkGraph";
 import DetailPanel from "@/components/network/DetailPanel";
 import NetworkToolbar from "@/components/network/NetworkToolbar";
+import NetworkLegend from "@/components/network/NetworkLegend";
 import { useNetworkGraph } from "@/hooks/useNetworkGraph";
+import { useMyChannelId } from "@/hooks/useMyChannelId";
 
 const PANEL_INSET = 340;
 
 export default function NetworkPage() {
   const { data, isLoading, isError } = useNetworkGraph();
+  const { data: me } = useMyChannelId();
   const [searchParams, setSearchParams] = useSearchParams();
   const graphRef = useRef<NetworkGraphHandle | null>(null);
 
@@ -37,7 +41,18 @@ export default function NetworkPage() {
   return (
     <MainLayout>
       <div className="max-w-full">
-        <h1 className="text-xl font-bold mb-3">VTuber 關係網路</h1>
+        <div className="flex items-center justify-between mb-3">
+          <h1 className="text-xl font-bold">VTuber 關係網路</h1>
+          {me?.isAdmin && (
+            <Link
+              to="/network/queue"
+              className="flex items-center gap-2 rounded-lg border border-gray-300 dark:border-zinc-700 px-3 py-1.5 text-sm hover:bg-gray-100 dark:hover:bg-zinc-800"
+            >
+              <FaClipboardList className="w-4 h-4" />
+              資料蒐集佇列
+            </Link>
+          )}
+        </div>
         <div className="relative h-[calc(100vh-10.5rem)] min-h-[420px] rounded-xl overflow-hidden border border-slate-800 bg-[#080d15]">
           {isLoading && (
             <div className="absolute inset-0 flex items-center justify-center text-slate-400">
@@ -70,6 +85,7 @@ export default function NetworkPage() {
                 onZoomOut={() => graphRef.current?.zoomOut()}
                 onFitAll={() => graphRef.current?.fitAll()}
               />
+              <NetworkLegend />
               {focusedId && (
                 <DetailPanel
                   data={data}

@@ -2,6 +2,8 @@
  * 關係網路資料蒐集佇列(管理員限定):任務級明細與統計。
  */
 
+import { Link } from "react-router-dom";
+import { FaArrowLeft } from "react-icons/fa";
 import MainLayout from "../components/layout/MainLayout";
 import { useMyChannelId } from "@/hooks/useMyChannelId";
 import {
@@ -109,6 +111,13 @@ export default function NetworkQueuePage() {
   return (
     <MainLayout>
       <div className="max-w-6xl mx-auto">
+        <Link
+          to="/network"
+          className="inline-flex items-center gap-1 text-sm text-sky-600 dark:text-sky-400 hover:underline mb-2"
+        >
+          <FaArrowLeft className="w-3 h-3" />
+          回到關係網路
+        </Link>
         <h1 className="text-xl font-bold mb-4">關係網路・資料蒐集佇列</h1>
 
         {meLoading && <p>載入中…</p>}

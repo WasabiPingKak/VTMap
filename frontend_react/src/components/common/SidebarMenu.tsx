@@ -56,16 +56,6 @@ const SidebarMenu = ({ collapsed, setCollapsed: _setCollapsed, isMobile = false,
       icon: <FaTools className="w-5 h-5" />,
       to: "/changelog",
     },
-    // 管理員限定項目
-    ...(user?.isAdmin
-      ? [
-          {
-            label: "資料蒐集佇列",
-            icon: <FaClipboardList className="w-5 h-5" />,
-            to: "/network/queue",
-          },
-        ]
-      : []),
   ];
 
   const snsLinks = [
