@@ -4,6 +4,10 @@ on:
   pull_request:
     branches: [develop, main]
 
+permissions:
+  contents: read
+  pull-requests: write # coverage comment 需在 PR 留言
+
 jobs:
   backend-lint:
     name: Backend Lint
