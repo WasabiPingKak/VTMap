@@ -21,8 +21,14 @@ python -m crawler add-channel UCxxxx               # 手動加入單一種子
 python -m crawler run                              # 消化佇列直到清空
 python -m crawler run --max-tasks 5 --kinds fetch_chat   # 限量/限類型
 python -m crawler status                           # 佇列與資料統計
+python -m crawler enrich-channels                  # 補完頻道正式名稱/handle/頭像
 python -m crawler serve --port 5001                # 前端開發用迷你 API server
 ```
+
+`enrich-channels` 用 YouTube Data API `channels.list`(50 頻道/1 unit,數百頻道
+只花個位數 units),補完 `title`(正式名稱)、`handle`(@代稱)、`thumbnail_url`
+(240px 頭像)。聊天室來的發言者名稱是 handle,存 `handle` 欄位不佔用 `title`。
+爬完一批後跑一次即可,已補完的頻道(`enriched_at`)不會重查。
 
 前端本機開發:啟動 serve 後,在 `frontend_react/.env.local` 設
 `VITE_NETWORK_API_BASE=http://127.0.0.1:5001`,`/network` 頁即可吃到真資料。
@@ -50,6 +56,7 @@ view,不需重爬。
 | `CRAWLER_BACKFILL_VIDEOS` | 10 | 每頻道回溯 VOD 數 |
 | `CRAWLER_MAX_DEPTH` | 1 | 擴張深度上限(種子=0) |
 | `CRAWLER_TASK_SLEEP` | 6 | 任務間隔秒數(另加隨機抖動) |
+| `YOUTUBE_API_KEY` | 讀 `.env.local` | enrich-channels 用的 YouTube Data API key |
 
 ## Schema 分環境
 

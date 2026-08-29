@@ -9,7 +9,7 @@ from typing import Any
 
 # 出現在任一條邊上的頻道(圖的節點)
 NODES_SQL = """
-select c.channel_id, c.title, c.thumbnail_url, c.in_vtmap
+select c.channel_id, c.title, c.handle, c.thumbnail_url, c.in_vtmap
 from channels c
 where c.channel_id in (
   select channel_a from network_edges
@@ -71,10 +71,11 @@ def build_graph_payload(
         {
             "channel_id": channel_id,
             "title": title,
+            "handle": handle,
             "thumbnail": thumbnail_url,
             "in_vtmap": bool(in_vtmap),
         }
-        for channel_id, title, thumbnail_url, in_vtmap in node_rows
+        for channel_id, title, handle, thumbnail_url, in_vtmap in node_rows
     ]
 
     return {"nodes": nodes, "edges": list(edges.values())}

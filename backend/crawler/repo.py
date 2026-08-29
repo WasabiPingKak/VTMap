@@ -26,6 +26,7 @@ def upsert_channel(
     channel_id: str,
     *,
     title: str | None = None,
+    handle: str | None = None,
     thumbnail_url: str | None = None,
     source: str = "discovered",
     in_vtmap: bool | None = None,
@@ -38,12 +39,13 @@ def upsert_channel(
         cur.execute(
             """
             insert into channels
-              (channel_id, title, thumbnail_url, source, in_vtmap, is_bot,
+              (channel_id, title, handle, thumbnail_url, source, in_vtmap, is_bot,
                has_stream_history, crawl_depth)
-            values (%s, %s, %s, %s, coalesce(%s, false), coalesce(%s, false),
+            values (%s, %s, %s, %s, %s, coalesce(%s, false), coalesce(%s, false),
                     %s, coalesce(%s, 0))
             on conflict (channel_id) do update set
               title = coalesce(excluded.title, channels.title),
+              handle = coalesce(excluded.handle, channels.handle),
               thumbnail_url = coalesce(excluded.thumbnail_url, channels.thumbnail_url),
               source = case when excluded.source = 'seed' then 'seed' else channels.source end,
               in_vtmap = channels.in_vtmap or excluded.in_vtmap,
@@ -55,6 +57,7 @@ def upsert_channel(
             (
                 channel_id,
                 title,
+                handle,
                 thumbnail_url,
                 source,
                 in_vtmap,
