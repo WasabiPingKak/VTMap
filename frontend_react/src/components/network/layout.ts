@@ -4,9 +4,12 @@
  *
  * 全圖模式:ForceAtlas2(LinLog + 邊權重)——Gephi 生態的標準做法,
  * 讓關係緊密的社群自然聚攏、群間拉開,搭配 Louvain 社群偵測上色。
+ * FA2 位置與社群偵測結果依資料快取,切換 ego 圓心不重算。
  *
  * ego 模式(指定圓心):以 BFS 分環(圓心=0、直接關係人=1、間接=2、
- * 其餘=3 外圍淡化),用 forceRadial 把各環約束在對應半徑。
+ * 其餘=3 外圍淡化)。半徑 = 關係強度;角度 = 該節點在全圖 FA2 佈局中
+ * 相對圓心的真實方位角,ego 視圖因此保留全圖的群組相對關係,
+ * 不做任何角度均勻化。
  */
 
 import forceAtlas2 from "graphology-layout-forceatlas2";
@@ -77,11 +80,13 @@ function assignRings(
 }
 
 /** 第一個子環的半徑:貼近圓心,拉近時頭像與名字清楚可讀 */
-const FIRST_RING_RADIUS = 250;
-/** 子環之間的間距(要容得下標籤高度) */
-const SUB_RING_GAP = 145;
+const FIRST_RING_RADIUS = 160;
+/** 子環之間的間距(要容得下標籤高度;殘餘重疊交給矩形分離) */
+const SUB_RING_GAP = 110;
 /** 節點在圓周上的水平間隔 */
-const ARC_PADDING = 26;
+const ARC_PADDING = 20;
+/** ego 結構(兩層內)與外圍殼之間的空隙 */
+const SHELL_GAP = 200;
 
 interface RingPlacement {
   radius: number;
@@ -89,53 +94,44 @@ interface RingPlacement {
 }
 
 /**
- * 依社群分配整圓的扇區,回傳每個節點的目標角度。
- * 同社群的節點固定落在同一個方向的楔形內(扇區寬度 ∝ 成員數),
- * 讓 ego 視圖保留「同群聚同方向」的群組結構。
+ * 把一圈成員放到目標角度上:batch 需已依目標角排序,
+ * 由前往後掃描,重疊時往前推開;頭尾繞圈重疊時整體回轉一半。
+ * 不做均勻化——節點盡量停在自己的目標方向,保留群組相對關係。
  */
-function computeSectorAngles(
-  nodeIds: string[],
-  communities: Map<string, number> | null,
-): Map<string, number> {
-  const targetAngles = new Map<string, number>();
-  const communityOf = (id: string) => communities?.get(id) ?? -1;
+function placeRingByAngle(
+  batch: string[],
+  radius: number,
+  occupied: (id: string) => number,
+  target: (id: string) => number,
+  placements: Map<string, RingPlacement>,
+) {
+  if (!batch.length) return;
+  const angularWidth = (id: string) => occupied(id) / radius;
 
-  const counts = new Map<number, number>();
-  for (const id of nodeIds) {
-    const community = communityOf(id);
-    counts.set(community, (counts.get(community) ?? 0) + 1);
+  const angles: number[] = [];
+  for (let i = 0; i < batch.length; i++) {
+    const desired = target(batch[i]);
+    if (i === 0) {
+      angles.push(desired);
+      continue;
+    }
+    const minAngle = angles[i - 1] + angularWidth(batch[i - 1]) / 2 + angularWidth(batch[i]) / 2;
+    angles.push(Math.max(desired, minAngle));
   }
-  // 大社群優先分配(順序穩定)
-  const ordered = [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0] - b[0]);
-  const total = nodeIds.length || 1;
-
-  const sectorCenter = new Map<number, number>();
-  const sectorWidth = new Map<number, number>();
-  let cursor = 0;
-  for (const [community, count] of ordered) {
-    const width = (count / total) * 2 * Math.PI;
-    sectorCenter.set(community, cursor + width / 2);
-    sectorWidth.set(community, width);
-    cursor += width;
-  }
-
-  for (const id of nodeIds) {
-    const community = communityOf(id);
-    const center = sectorCenter.get(community) ?? 0;
-    const width = sectorWidth.get(community) ?? 2 * Math.PI;
-    // 扇區內用穩定雜湊抖動,避免同群全部疊在同一個角度
-    const jitter = (hashAngle(id) / (2 * Math.PI) - 0.5) * width * 0.85;
-    targetAngles.set(id, center + jitter);
-  }
-  return targetAngles;
+  const overshoot =
+    angles[angles.length - 1] +
+    angularWidth(batch[batch.length - 1]) / 2 -
+    (angles[0] - angularWidth(batch[0]) / 2 + 2 * Math.PI);
+  const shift = overshoot > 0 ? overshoot / 2 : 0;
+  batch.forEach((id, i) => {
+    placements.set(id, { radius, angle: angles[i] - shift });
+  });
 }
 
 /**
- * 把成員排進一圈圈同心子環:依傳入順序(強度由大到小)填,
- * 一圈塞滿(圓周容不下下一個)就往外開新的一圈。
- * 同圈成員依「目標角度」(社群扇區)排,盡量貼近目標方向,
- * 圓周擁擠時退回按佔用寬度比例分配。
- * 回傳每個成員的半徑與角度,以及最外圈的半徑。
+ * 依傳入順序(強度由大到小)填同心子環:
+ * 一圈塞滿(圓周容不下下一個)就往外開新的一圈,
+ * 同圈成員依目標角度就位。回傳最外圈半徑。
  */
 function packIntoSubRings(
   members: string[],
@@ -163,49 +159,55 @@ function packIntoSubRings(
       used += need;
       index += 1;
     }
-
-    // 依目標角度排序後放置:先放在目標角,前向掃描推開重疊
     batch.sort((a, b) => target(a) - target(b));
-    const angularWidth = (id: string) => occupied(id) / radius;
-
-    if (used / capacity > 0.82) {
-      // 圓周快滿:按佔用比例分配,起點取第一個成員的目標角(方向大致保留)
-      let angle = target(batch[0]);
-      for (const id of batch) {
-        const share = (occupied(id) / used) * 2 * Math.PI;
-        placements.set(id, { radius, angle: angle + share / 2 });
-        angle += share;
-      }
-    } else {
-      const angles: number[] = [];
-      for (let i = 0; i < batch.length; i++) {
-        const desired = target(batch[i]);
-        if (i === 0) {
-          angles.push(desired);
-          continue;
-        }
-        const minAngle =
-          angles[i - 1] + angularWidth(batch[i - 1]) / 2 + angularWidth(batch[i]) / 2;
-        angles.push(Math.max(desired, minAngle));
-      }
-      // 頭尾繞圈重疊時整體回轉一點
-      const overshoot =
-        angles[angles.length - 1] +
-        angularWidth(batch[batch.length - 1]) / 2 -
-        (angles[0] - angularWidth(batch[0]) / 2 + 2 * Math.PI);
-      const shift = overshoot > 0 ? overshoot / 2 : 0;
-      batch.forEach((id, i) => {
-        placements.set(id, { radius, angle: angles[i] - shift });
-      });
-    }
-
+    placeRingByAngle(batch, radius, occupied, target, placements);
     if (index < members.length) radius += SUB_RING_GAP;
   }
 
   return { placements, outerRadius: radius };
 }
 
-/** 穩定的偽隨機角度 */
+/**
+ * 沒有內外順序意義的成員(第二層、外圍殼):
+ * 依目標角度排序後輪流分配到 k 圈,每一圈都涵蓋全方位,
+ * 同一個群組因此在內外圈對齊成放射狀楔形。
+ */
+function packRoundRobinRings(
+  members: string[],
+  halfWidthById: Map<string, number>,
+  startRadius: number,
+  targetAngles: Map<string, number>,
+): { placements: Map<string, RingPlacement>; outerRadius: number } {
+  const placements = new Map<string, RingPlacement>();
+  if (!members.length) return { placements, outerRadius: startRadius };
+
+  const occupied = (id: string) => (halfWidthById.get(id) ?? HEX_RADIUS) * 2 + ARC_PADDING;
+  const target = (id: string) => targetAngles.get(id) ?? hashAngle(id);
+
+  // 需要幾圈:由內往外累計圓周容量,直到裝得下全部成員
+  const totalNeed = members.reduce((sum, id) => sum + occupied(id), 0);
+  let ringCount = 1;
+  let capacity = 2 * Math.PI * startRadius;
+  while (capacity < totalNeed) {
+    capacity += 2 * Math.PI * (startRadius + ringCount * SUB_RING_GAP);
+    ringCount += 1;
+  }
+
+  const sorted = [...members].sort((a, b) => target(a) - target(b) || a.localeCompare(b));
+  const batches: string[][] = Array.from({ length: ringCount }, () => []);
+  sorted.forEach((id, i) => batches[i % ringCount].push(id));
+
+  let outerRadius = startRadius;
+  batches.forEach((batch, ring) => {
+    const radius = startRadius + ring * SUB_RING_GAP;
+    outerRadius = Math.max(outerRadius, radius);
+    placeRingByAngle(batch, radius, occupied, target, placements);
+  });
+
+  return { placements, outerRadius };
+}
+
+/** 穩定的偽隨機角度(缺全圖位置時的後備) */
 function hashAngle(id: string): number {
   let hash = 0;
   for (let i = 0; i < id.length; i++) {
@@ -218,8 +220,8 @@ function hashAngle(id: string): number {
  * ego 模式:以圓心為原點的同心環佈局。
  *
  * 半徑 = 關係強度:第一層依證據數由強到弱填子環,最強貼近圓心。
- * 角度 = 社群方向:同社群固定佔同一個扇區,內外圈對齊成放射狀楔形,
- * 保留「同群聚同方向」的群組結構。
+ * 角度 = 全圖方位:每個節點取它在全圖 FA2 佈局中相對圓心的方位角,
+ * 群組的相對方向與全圖一致,切換檢視時視覺上可對照。
  * 位置由打包直接決定(不跑力學模擬),殘餘重疊交給矩形分離,速度快且確定。
  */
 function computeEgoPositions(
@@ -227,10 +229,20 @@ function computeEgoPositions(
   centerId: string,
   rings: Map<string, number>,
   halfWidthById: Map<string, number>,
-  communities: Map<string, number> | null,
+  globalPositions: { x: number; y: number }[],
 ): { x: number; y: number }[] {
   const nodeIds = data.nodes.map((n) => n.channel_id);
-  const targetAngles = computeSectorAngles(nodeIds, communities);
+
+  // 目標角度:全圖 FA2 佈局中相對圓心的方位角
+  const centerIndex = nodeIds.indexOf(centerId);
+  const cx = globalPositions[centerIndex]?.x ?? 0;
+  const cy = globalPositions[centerIndex]?.y ?? 0;
+  const targetAngles = new Map<string, number>();
+  nodeIds.forEach((id, i) => {
+    const dx = globalPositions[i].x - cx;
+    const dy = globalPositions[i].y - cy;
+    targetAngles.set(id, dx === 0 && dy === 0 ? hashAngle(id) : Math.atan2(dy, dx));
+  });
 
   // 圓心與各直接關係人的證據數(關係強度)
   const strengthToCenter = new Map<string, number>();
@@ -249,16 +261,15 @@ function computeEgoPositions(
   });
   const first = packIntoSubRings(firstLayer, halfWidthById, FIRST_RING_RADIUS, targetAngles);
 
-  // 第二層:排在第一層最外圈之外,同樣可分成多個子環
-  const secondStart = first.outerRadius + SUB_RING_GAP + 40;
-  const second = packIntoSubRings(byRing[2], halfWidthById, secondStart, targetAngles);
+  // 第二層:排在第一層最外圈之外;無內外順序,輪流分配讓每圈涵蓋全方位
+  const secondStart = first.outerRadius + SUB_RING_GAP;
+  const second = packRoundRobinRings(byRing[2], halfWidthById, secondStart, targetAngles);
 
   const placements = new Map<string, RingPlacement>([...first.placements, ...second.placements]);
 
-  // 外圍(無關)節點:子環打包成有序的淡色殼,與 ego 結構保留明顯空隙。
-  // 圓周容量必須真的裝得下,不能全部疊在同一圈。
-  const outerStart = second.outerRadius + SUB_RING_GAP + 220;
-  const outer = packIntoSubRings(byRing[3], halfWidthById, outerStart, targetAngles);
+  // 外圍(無關)節點:打包成有序的淡色殼,與 ego 結構保留明顯空隙
+  const outerStart = second.outerRadius + SHELL_GAP;
+  const outer = packRoundRobinRings(byRing[3], halfWidthById, outerStart, targetAngles);
   for (const [id, placement] of outer.placements) {
     placements.set(id, placement);
   }
@@ -331,6 +342,28 @@ function computeGlobalPositions(data: NetworkGraphData): { x: number; y: number 
   return positions;
 }
 
+/**
+ * 全圖基底(FA2 位置 + Louvain 社群)依資料物件快取:
+ * 同一份資料在全圖/各種 ego 圓心之間切換時只算一次。
+ */
+interface GlobalBasis {
+  positions: { x: number; y: number }[];
+  communities: Map<string, number> | null;
+}
+const globalBasisCache = new WeakMap<NetworkGraphData, GlobalBasis>();
+
+function getGlobalBasis(data: NetworkGraphData): GlobalBasis {
+  let basis = globalBasisCache.get(data);
+  if (!basis) {
+    basis = {
+      positions: computeGlobalPositions(data),
+      communities: data.nodes.length ? detectCommunities(data) : null,
+    };
+    globalBasisCache.set(data, basis);
+  }
+  return basis;
+}
+
 export function computeLayout(
   data: NetworkGraphData,
   measure?: MeasureFn,
@@ -347,11 +380,11 @@ export function computeLayout(
   const rings = egoActive
     ? assignRings(ego!.centerId, nodeIds, buildAdjacency(data))
     : null;
-  const communities = data.nodes.length ? detectCommunities(data) : null;
+  const basis = getGlobalBasis(data);
 
   const positions = egoActive
-    ? computeEgoPositions(data, ego!.centerId, rings!, halfWidthById, communities)
-    : computeGlobalPositions(data);
+    ? computeEgoPositions(data, ego!.centerId, rings!, halfWidthById, basis.positions)
+    : basis.positions;
 
   // 矩形分離:保證「節點 + 下方標籤」零重疊
   const footprints: FootprintNode[] = positions.map((p, i) => ({
@@ -430,6 +463,6 @@ export function computeLayout(
     bounds: { minX, minY, maxX, maxY },
     egoCenterId: egoActive ? ego!.centerId : null,
     rings,
-    communities,
+    communities: basis.communities,
   };
 }

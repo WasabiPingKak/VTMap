@@ -150,11 +150,12 @@ const NetworkGraph = forwardRef<NetworkGraphHandle, NetworkGraphProps>(function 
     };
   }, [layout]);
 
-  // 初次載入:fit 全圖
+  // 初次載入:fit 全圖(ego 模式進頁由下方的圓心取景效果負責,不在這裡搶相機)
   const didInitialFit = useRef(false);
   useEffect(() => {
     if (didInitialFit.current || !layout.nodes.length) return;
     didInitialFit.current = true;
+    if (layout.egoCenterId) return;
     const { minX, minY, maxX, maxY } = layout.bounds;
     // 等 canvas 完成第一次 resize
     requestAnimationFrame(() => canvasRef.current?.fitBounds(minX, minY, maxX, maxY));
@@ -191,7 +192,8 @@ const NetworkGraph = forwardRef<NetworkGraphHandle, NetworkGraphProps>(function 
     if (!Number.isFinite(minX)) {
       ({ minX, minY, maxX, maxY } = layout.bounds);
     }
-    canvasRef.current?.fitBounds(minX, minY, maxX, maxY);
+    // 等 canvas 完成第一次 resize(直接帶網址進頁時 mount 當下尺寸還是 0)
+    requestAnimationFrame(() => canvasRef.current?.fitBounds(minX, minY, maxX, maxY));
   }, [egoCenterId, layout]);
 
   // 聚焦變化:相機移過去 + 重繪
