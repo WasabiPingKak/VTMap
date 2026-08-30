@@ -93,6 +93,14 @@ def process_fetch_chat(conn: psycopg.Connection, task: repo.Task) -> None:
 
     with tempfile.TemporaryDirectory(prefix="vtmap_chat_") as tmp:
         result = ytdlp.download_live_chat(task.video_id, Path(tmp))
+        if result.skip_status:
+            repo.insert_crawl_log(
+                conn,
+                video_id=task.video_id,
+                host_channel_id=host_channel_id,
+                status=result.skip_status,
+            )
+            return
         if result.chat_path is None:
             repo.insert_crawl_log(
                 conn, video_id=task.video_id, host_channel_id=host_channel_id, status="no_chat"

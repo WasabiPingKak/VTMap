@@ -31,6 +31,7 @@ class ChatDownloadResult:
     chat_path: Path | None  # None = 該影片沒有聊天室 replay
     published_at: datetime | None
     title: str
+    skip_status: str | None = None  # 受限制影片等非重試型狀態
 
 
 def list_recent_streams(channel_id: str, limit: int) -> list[StreamEntry] | None:
@@ -64,6 +65,32 @@ def list_recent_streams(channel_id: str, limit: int) -> list[StreamEntry] | None
     return entries
 
 
+_MEMBERS_ONLY_MARKERS = (
+    "members-only content",
+    "channel's members",
+    "join this channel",
+)
+_AGE_RESTRICTED_MARKERS = ("confirm your age",)
+_UNAVAILABLE_MARKERS = (
+    "video unavailable",
+    "this video is unavailable",
+    "private video",
+    "this video is private",
+)
+
+
+def classify_download_error(stderr: str) -> str | None:
+    """將 yt-dlp 錯誤分類為不需重試的影片狀態。"""
+    stderr_lower = stderr.lower()
+    if any(marker in stderr_lower for marker in _MEMBERS_ONLY_MARKERS):
+        return "members_only"
+    if any(marker in stderr_lower for marker in _AGE_RESTRICTED_MARKERS):
+        return "age_restricted"
+    if any(marker in stderr_lower for marker in _UNAVAILABLE_MARKERS):
+        return "video_unavailable"
+    return None
+
+
 def download_live_chat(video_id: str, work_dir: Path) -> ChatDownloadResult:
     """下載影片的聊天室 replay 與 metadata。
 
@@ -86,6 +113,9 @@ def download_live_chat(video_id: str, work_dir: Path) -> ChatDownloadResult:
     ]
     proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", timeout=1800)
     if proc.returncode != 0:
+        skip_status = classify_download_error(proc.stderr)
+        if skip_status:
+            return ChatDownloadResult(chat_path=None, published_at=None, title="", skip_status=skip_status)
         raise RuntimeError(f"yt-dlp 下載聊天室失敗:{proc.stderr.strip()[-500:]}")
 
     chat_path: Path | None = work_dir / f"{video_id}.live_chat.json"
