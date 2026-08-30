@@ -208,10 +208,16 @@ function computeEgoPositions(
     }
   }
 
-  const outerRadius = second.outerRadius + SUB_RING_GAP + 80;
-  for (const id of byRing[3]) {
-    placements.set(id, { radius: outerRadius, angle: hashAngle(id) });
+  // 外圍(無關)節點:同樣以子環打包成有序的淡色殼。
+  // 圓周容量必須真的裝得下(不能全部疊在同一圈,否則矩形分離會把
+  // 它們炸開成厚球、連帶擠壞內部結構),並與 ego 結構保留明顯空隙。
+  const outerStart = second.outerRadius + SUB_RING_GAP + 220;
+  const outerSorted = [...byRing[3]].sort((a, b) => hashAngle(a) - hashAngle(b));
+  const outer = packIntoSubRings(outerSorted, halfWidthById, outerStart);
+  for (const [id, placement] of outer.placements) {
+    placements.set(id, placement);
   }
+  const fallbackRadius = outer.outerRadius;
 
   const simNodes: SimNode[] = data.nodes.map((n) => ({ id: n.channel_id }));
   for (const sn of simNodes) {
@@ -235,10 +241,10 @@ function computeEgoPositions(
     .force(
       "radial",
       forceRadial(
-        (d) => placements.get((d as SimNode).id)?.radius ?? outerRadius,
+        (d) => placements.get((d as SimNode).id)?.radius ?? fallbackRadius,
         0,
         0,
-      ).strength((d) => (rings.get((d as SimNode).id)! >= EGO_OUTER_RING ? 0.4 : 0.95)),
+      ).strength((d) => (rings.get((d as SimNode).id)! >= EGO_OUTER_RING ? 0.6 : 0.95)),
     )
     .stop();
 
