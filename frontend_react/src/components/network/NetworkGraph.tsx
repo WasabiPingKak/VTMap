@@ -45,9 +45,7 @@ const NetworkGraph = forwardRef<NetworkGraphHandle, NetworkGraphProps>(function 
   );
   const starField = useMemo(() => createStarField(), []);
 
-  const thumbnails = useMemo(() => layout.nodes.map((n) => n.node.thumbnail), [layout]);
-  const imagesRef = useImageCache(
-    thumbnails,
+  const { cacheRef: imagesRef, requestImage } = useImageCache(
     useCallback(() => canvasRef.current?.requestRender(), []),
   );
 
@@ -66,10 +64,11 @@ const NetworkGraph = forwardRef<NetworkGraphHandle, NetworkGraphProps>(function 
         focusedId: focused,
         highlightIds: focused ? (layout.neighbors.get(focused) ?? new Set()) : null,
         starField,
+        requestImage,
       };
       drawNetwork(ctx, transform, size.width, size.height, state);
     },
-    [layout, starField, imagesRef],
+    [layout, starField, imagesRef, requestImage],
   );
 
   const onHover = useCallback(
@@ -92,6 +91,39 @@ const NetworkGraph = forwardRef<NetworkGraphHandle, NetworkGraphProps>(function 
     },
     [layout, onFocusChange],
   );
+
+  // dev 專用 benchmark 模式:?benchmark=1 時飛到最大 hub(完整細節縮放),連續重繪量測穩態幀時間
+  const benchArmed = useRef(false);
+  useEffect(() => {
+    if (!import.meta.env.DEV || benchArmed.current || !layout.nodes.length) return;
+    const params = new URLSearchParams(window.location.search);
+    if (!params.has("benchmark")) return;
+    benchArmed.current = true;
+    let running = true;
+    const loop = () => {
+      if (!running) return;
+      canvasRef.current?.requestRender();
+      requestAnimationFrame(loop);
+    };
+    const timer = setTimeout(() => {
+      let hub = layout.nodes[0];
+      let bestDegree = -1;
+      for (const n of layout.nodes) {
+        const degree = layout.neighbors.get(n.node.channel_id)?.size ?? 0;
+        if (degree > bestDegree) {
+          bestDegree = degree;
+          hub = n;
+        }
+      }
+      canvasRef.current?.panTo(hub.x, hub.y, Number(params.get("benchzoom")) || 1);
+      setTimeout(() => requestAnimationFrame(loop), 1500);
+    }, 5000);
+    return () => {
+      benchArmed.current = false;
+      running = false;
+      clearTimeout(timer);
+    };
+  }, [layout]);
 
   // 初次載入:fit 全圖
   const didInitialFit = useRef(false);

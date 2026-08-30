@@ -204,7 +204,7 @@ function computeGlobalPositions(data: NetworkGraphData): { x: number; y: number 
 
   if (graph.size > 0) {
     forceAtlas2.assign(graph, {
-      iterations: 400,
+      iterations: 300,
       getEdgeWeight: "weight",
       settings: {
         linLogMode: true,
@@ -213,7 +213,7 @@ function computeGlobalPositions(data: NetworkGraphData): { x: number; y: number 
         strongGravityMode: true,
         scalingRatio: 6,
         edgeWeightInfluence: 1,
-        barnesHutOptimize: graph.order > 400,
+        barnesHutOptimize: graph.order > 200,
       },
     });
   }
@@ -253,6 +253,8 @@ export function computeLayout(
   measure?: MeasureFn,
   ego?: EgoOptions,
 ): GraphLayout {
+  const layoutStart =
+    typeof performance !== "undefined" ? performance.now() : 0;
   const measureFn = measure ?? createDefaultMeasure();
   const metrics = data.nodes.map((n) => computeLabelMetrics(channelDisplayName(n), measureFn));
   const halfWidthById = new Map(data.nodes.map((n, i) => [n.channel_id, metrics[i].halfWidth]));
@@ -328,6 +330,13 @@ export function computeLayout(
   }
   if (!nodes.length) {
     minX = minY = maxX = maxY = 0;
+  }
+
+  if (import.meta.env?.DEV && typeof performance !== "undefined") {
+    console.log(
+      `[graph-perf] layout=${(performance.now() - layoutStart).toFixed(0)}ms ` +
+        `nodes=${nodes.length} edges=${edges.length} ego=${egoActive}`,
+    );
   }
 
   return {
