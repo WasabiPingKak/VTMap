@@ -11,6 +11,8 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
+from crawler.settings import LIST_SCAN_MULTIPLIER
+
 logger = logging.getLogger(__name__)
 
 _YTDLP_BASE = [sys.executable, "-m", "yt_dlp", "--socket-timeout", "30", "--retries", "3"]
@@ -34,16 +36,26 @@ class ChatDownloadResult:
     skip_status: str | None = None  # 受限制影片等非重試型狀態
 
 
+# 列表階段就看得出抓不到聊天室的 availability(會員限定、需登入、付費、私人)
+_UNFETCHABLE_AVAILABILITY = frozenset(
+    {"subscriber_only", "needs_auth", "premium_only", "private"}
+)
+
+
 def list_recent_streams(channel_id: str, limit: int) -> list[StreamEntry] | None:
-    """列出頻道直播分頁最近的影片;頻道沒有直播分頁時回傳 None。"""
+    """列出頻道最近「抓得到聊天室」的直播;頻道沒有直播分頁時回傳 None。
+
+    掃描窗口是 limit 的數倍:會員限定與進行中/預定的直播在列表階段就濾掉,
+    讓 limit 個回溯額度都留給真的下載得到 replay 的影片。
+    """
     url = f"https://www.youtube.com/channel/{channel_id}/streams"
     cmd = [
         *_YTDLP_BASE,
         "--flat-playlist",
         "--playlist-end",
-        str(limit),
+        str(limit * LIST_SCAN_MULTIPLIER),
         "--print",
-        "%(id)s\t%(live_status)s\t%(title)s",
+        "%(id)s\t%(live_status)s\t%(availability)s\t%(title)s",
         url,
     ]
     proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", timeout=120)
@@ -55,13 +67,19 @@ def list_recent_streams(channel_id: str, limit: int) -> list[StreamEntry] | None
 
     entries = []
     for line in proc.stdout.splitlines():
-        parts = line.split("\t", 2)
-        if len(parts) != 3:
+        parts = line.split("\t", 3)
+        if len(parts) != 4:
             continue
-        video_id, live_status, title = parts
+        video_id, live_status, availability, title = parts
+        if live_status in ("is_live", "is_upcoming"):
+            continue  # 進行中或預定直播沒有 replay
+        if availability in _UNFETCHABLE_AVAILABILITY:
+            continue
         if live_status in ("NA", "none"):
             live_status = ""
         entries.append(StreamEntry(video_id=video_id, live_status=live_status, title=title))
+        if len(entries) >= limit:
+            break
     return entries
 
 
@@ -74,6 +92,7 @@ _AGE_RESTRICTED_MARKERS = ("confirm your age",)
 _UNAVAILABLE_MARKERS = (
     "video unavailable",
     "this video is unavailable",
+    "this video is not available",
     "private video",
     "this video is private",
 )

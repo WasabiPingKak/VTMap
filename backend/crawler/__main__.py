@@ -5,6 +5,8 @@
   python -m crawler seed --api-base https://...    # 從 VTMap API 載入種子
   python -m crawler add-channel UCxxxx             # 手動加入單一種子頻道
   python -m crawler run [--max-tasks N] [--kinds fetch_chat ...] [--sleep S]
+  python -m crawler run --max-hours 12              # 無人值守:自動保養與重連
+  python -m crawler expand                         # 補排未爬頻道 + 重算優先權
   python -m crawler status                         # 佇列與資料統計
   python -m crawler enrich-channels [--limit N]    # 補完頻道正式名稱與頭像(YouTube API)
   python -m crawler serve [--port 5001]            # 前端開發用迷你 API server
@@ -41,8 +43,17 @@ def main() -> None:
         default=None,
     )
     p_run.add_argument("--sleep", type=float, default=None)
+    p_run.add_argument(
+        "--max-hours",
+        type=float,
+        default=None,
+        help="長時間無人值守模式:跑滿指定時數,段間自動保養並在連線斷掉時重連",
+    )
+    p_run.add_argument("--maintain-every", type=int, default=None, help="每幾個任務保養一次")
 
     sub.add_parser("status")
+
+    sub.add_parser("expand")
 
     p_enrich = sub.add_parser("enrich-channels")
     p_enrich.add_argument("--limit", type=int, default=None)
@@ -56,6 +67,27 @@ def main() -> None:
         from crawler.dev_server import serve
 
         serve(args.port)
+        return
+
+    # 無人值守模式自己管理連線(分段重連),不能包在下面共用的連線裡
+    if args.command == "run" and args.max_hours is not None:
+        from crawler.settings import MAINTENANCE_EVERY_TASKS, get_youtube_api_key
+
+        try:
+            api_key: str | None = get_youtube_api_key()
+        except Exception:
+            api_key = None
+            logging.warning("找不到 YOUTUBE_API_KEY,保養時將略過訂閱數補完")
+
+        kwargs: dict = {
+            "max_hours": args.max_hours,
+            "youtube_api_key": api_key,
+            "maintain_every": args.maintain_every or MAINTENANCE_EVERY_TASKS,
+        }
+        if args.sleep is not None:
+            kwargs["sleep_seconds"] = args.sleep
+        processed = pipeline.run_unattended(**kwargs)
+        print(f"本次處理 {processed} 個任務")
         return
 
     with get_conn() as conn:
@@ -84,6 +116,14 @@ def main() -> None:
 
             updated, missing = enrich_channels(conn, get_youtube_api_key(), limit=args.limit)
             print(f"已補完 {updated} 個頻道,{missing} 個查無資料(已刪除或停權)")
+
+        elif args.command == "expand":
+            from crawler.settings import MIN_SUBSCRIBERS
+
+            added = repo.enqueue_missing_list_videos(conn, MIN_SUBSCRIBERS)
+            scored = repo.reprioritize_pending_list_videos(conn)
+            conn.commit()
+            print(f"新排入 {added} 個頻道的 list_videos,重算 {scored} 筆待處理任務的優先權")
 
         elif args.command == "status":
             print("=== 佇列 ===")

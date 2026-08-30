@@ -15,12 +15,25 @@ DB_SCHEMA = os.getenv("CRAWLER_DB_SCHEMA", "staging")
 # 每個頻道回溯的直播 VOD 數
 BACKFILL_VIDEOS_PER_CHANNEL = int(os.getenv("CRAWLER_BACKFILL_VIDEOS", "10"))
 
+# 列表階段的掃描倍率:會員限定與進行中的直播會被濾掉,多掃幾部才補得滿回溯額度
+LIST_SCAN_MULTIPLIER = int(os.getenv("CRAWLER_LIST_SCAN_MULTIPLIER", "3"))
+
 # 擴張深度上限:crawl_depth <= 此值的合格頻道才會被排入 list_videos
-# (種子 = 0,種子的管理員 = 1;預設爬到 1,節點最遠長到 2)
-MAX_CRAWL_DEPTH = int(os.getenv("CRAWLER_MAX_DEPTH", "1"))
+# -1 = 不設限,改由佇列優先權(連結度優先)與 run --max-tasks 的預算控制擴張範圍
+MAX_CRAWL_DEPTH = int(os.getenv("CRAWLER_MAX_DEPTH", "-1"))
+
+# 訂閱數低於此值的頻道不排入爬取(network_edges view 也會濾掉,爬了畫不出來)
+MIN_SUBSCRIBERS = int(os.getenv("CRAWLER_MIN_SUBSCRIBERS", "100"))
 
 # 每個任務之間的等待秒數(加上隨機抖動),避免請求過密
 TASK_SLEEP_SECONDS = float(os.getenv("CRAWLER_TASK_SLEEP", "6"))
+
+# 長時間執行時每處理幾個任務做一次保養(補完訂閱數、重算優先權、回收孤兒任務)
+MAINTENANCE_EVERY_TASKS = int(os.getenv("CRAWLER_MAINTENANCE_EVERY", "400"))
+
+# running 超過這麼久視為孤兒任務(程序中斷留下的),放回 pending 重跑
+# 聊天室下載本身的 timeout 是 30 分鐘,門檻要比它寬
+STALE_RUNNING_MINUTES = int(os.getenv("CRAWLER_STALE_RUNNING_MINUTES", "60"))
 
 # 已知聊天機器人帳號名稱(比對時轉小寫)
 KNOWN_BOT_NAMES = {

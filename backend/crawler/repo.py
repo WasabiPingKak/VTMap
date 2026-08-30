@@ -106,6 +106,84 @@ def enqueue(
         )
 
 
+def enqueue_missing_list_videos(conn: psycopg.Connection, min_subscribers: int) -> int:
+    """為所有合格但從未排過 list_videos 的頻道排入任務,回傳新增筆數。
+
+    check_qualification 的去重是永久的,所以放寬深度上限後,先前被擋下的頻道
+    不會自己重排。這個操作補上那些缺口(訂閱數未知的頻道先放行,等 enrich 補完)。
+    """
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            insert into crawl_queue (kind, channel_id)
+            select %s, c.channel_id
+            from channels c
+            where c.has_stream_history
+              and not c.is_bot
+              and (c.subscriber_count is null or c.subscriber_count >= %s)
+              and not exists (
+                select 1 from crawl_queue q
+                where q.kind = %s and q.channel_id = c.channel_id
+              )
+            on conflict do nothing
+            """,
+            (KIND_LIST_VIDEOS, min_subscribers, KIND_LIST_VIDEOS),
+        )
+        return cur.rowcount
+
+
+def reprioritize_pending_list_videos(conn: psycopg.Connection) -> int:
+    """重算待處理 list_videos 的優先權:連結度優先,同連結度比訂閱數。
+
+    優先權 = 連結度 × 1000 + 訂閱數級距(log10 × 100,上限 999),
+    所以連結度永遠壓過訂閱數。連結度與訂閱數都會隨爬取變動,每批開跑前重算一次。
+    """
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            with deg as (
+              select c, count(*) as degree from (
+                select channel_a as c from network_edges
+                union all
+                select channel_b from network_edges
+              ) t group by c
+            )
+            update crawl_queue q
+            set priority = coalesce(d.degree, 0) * 1000
+                         + least(
+                             999,
+                             floor(log(greatest(coalesce(ch.subscriber_count, 1), 1)) * 100)::int
+                           )
+            from channels ch
+            left join deg d on d.c = ch.channel_id
+            where q.kind = %s
+              and q.status = 'pending'
+              and q.channel_id = ch.channel_id
+            """,
+            (KIND_LIST_VIDEOS,),
+        )
+        return cur.rowcount
+
+
+def reclaim_stale_running(conn: psycopg.Connection, older_than_minutes: int) -> int:
+    """把卡在 running 太久的任務放回 pending,回傳筆數。
+
+    程序中途被砍或連線斷掉時,已認領的任務會永遠停在 running(claim 只挑 pending),
+    長時間執行必須定期回收,否則這些任務就此消失。
+    """
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            update crawl_queue
+            set status = 'pending'
+            where status = 'running'
+              and updated_at < now() - make_interval(mins => %s)
+            """,
+            (older_than_minutes,),
+        )
+        return cur.rowcount
+
+
 def claim_next_task(conn: psycopg.Connection, kinds: list[str]) -> Task | None:
     """取出一筆待處理任務並標記為 running(FOR UPDATE SKIP LOCKED 防重複認領)。"""
     with conn.cursor() as cur:
