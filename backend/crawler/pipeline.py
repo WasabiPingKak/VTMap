@@ -163,8 +163,11 @@ def process_check_qualification(conn: psycopg.Connection, task: repo.Task) -> No
         has_history = entries is not None and len(entries) > 0
         repo.set_qualification(conn, task.channel_id, has_history=bool(has_history))
 
-    if has_history and depth <= MAX_CRAWL_DEPTH:
-        repo.enqueue(conn, repo.KIND_LIST_VIDEOS, channel_id=task.channel_id)
+    if not has_history:
+        return
+    if MAX_CRAWL_DEPTH >= 0 and depth > MAX_CRAWL_DEPTH:
+        return
+    repo.enqueue(conn, repo.KIND_LIST_VIDEOS, channel_id=task.channel_id)
 
 
 _PROCESSORS = {

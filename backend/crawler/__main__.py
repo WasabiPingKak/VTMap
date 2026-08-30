@@ -5,6 +5,7 @@
   python -m crawler seed --api-base https://...    # 從 VTMap API 載入種子
   python -m crawler add-channel UCxxxx             # 手動加入單一種子頻道
   python -m crawler run [--max-tasks N] [--kinds fetch_chat ...] [--sleep S]
+  python -m crawler expand                         # 補排未爬頻道 + 重算優先權
   python -m crawler status                         # 佇列與資料統計
   python -m crawler enrich-channels [--limit N]    # 補完頻道正式名稱與頭像(YouTube API)
   python -m crawler serve [--port 5001]            # 前端開發用迷你 API server
@@ -43,6 +44,8 @@ def main() -> None:
     p_run.add_argument("--sleep", type=float, default=None)
 
     sub.add_parser("status")
+
+    sub.add_parser("expand")
 
     p_enrich = sub.add_parser("enrich-channels")
     p_enrich.add_argument("--limit", type=int, default=None)
@@ -84,6 +87,14 @@ def main() -> None:
 
             updated, missing = enrich_channels(conn, get_youtube_api_key(), limit=args.limit)
             print(f"已補完 {updated} 個頻道,{missing} 個查無資料(已刪除或停權)")
+
+        elif args.command == "expand":
+            from crawler.settings import MIN_SUBSCRIBERS
+
+            added = repo.enqueue_missing_list_videos(conn, MIN_SUBSCRIBERS)
+            scored = repo.reprioritize_pending_list_videos(conn)
+            conn.commit()
+            print(f"新排入 {added} 個頻道的 list_videos,重算 {scored} 筆待處理任務的優先權")
 
         elif args.command == "status":
             print("=== 佇列 ===")

@@ -19,8 +19,11 @@ BACKFILL_VIDEOS_PER_CHANNEL = int(os.getenv("CRAWLER_BACKFILL_VIDEOS", "10"))
 LIST_SCAN_MULTIPLIER = int(os.getenv("CRAWLER_LIST_SCAN_MULTIPLIER", "3"))
 
 # 擴張深度上限:crawl_depth <= 此值的合格頻道才會被排入 list_videos
-# (種子 = 0,種子的管理員 = 1;預設爬到 1,節點最遠長到 2)
-MAX_CRAWL_DEPTH = int(os.getenv("CRAWLER_MAX_DEPTH", "1"))
+# -1 = 不設限,改由佇列優先權(連結度優先)與 run --max-tasks 的預算控制擴張範圍
+MAX_CRAWL_DEPTH = int(os.getenv("CRAWLER_MAX_DEPTH", "-1"))
+
+# 訂閱數低於此值的頻道不排入爬取(network_edges view 也會濾掉,爬了畫不出來)
+MIN_SUBSCRIBERS = int(os.getenv("CRAWLER_MIN_SUBSCRIBERS", "100"))
 
 # 每個任務之間的等待秒數(加上隨機抖動),避免請求過密
 TASK_SLEEP_SECONDS = float(os.getenv("CRAWLER_TASK_SLEEP", "6"))
