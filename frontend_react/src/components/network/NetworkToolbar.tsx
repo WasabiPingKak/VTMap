@@ -3,7 +3,7 @@
  */
 
 import { useMemo, useState } from "react";
-import { Maximize2, Minus, Plus, Search } from "lucide-react";
+import { LocateFixed, Maximize2, Minus, Plus, Search } from "lucide-react";
 import type { NetworkGraphData, NetworkNode } from "@/types/network";
 import { channelDisplayName } from "./displayName";
 
@@ -13,6 +13,7 @@ interface NetworkToolbarProps {
   onZoomIn: () => void;
   onZoomOut: () => void;
   onFitAll: () => void;
+  onLocate: () => void;
 }
 
 export default function NetworkToolbar({
@@ -21,6 +22,7 @@ export default function NetworkToolbar({
   onZoomIn,
   onZoomOut,
   onFitAll,
+  onLocate,
 }: NetworkToolbarProps) {
   const [query, setQuery] = useState("");
 
@@ -76,6 +78,7 @@ export default function NetworkToolbar({
           { icon: <Plus size={16} />, action: onZoomIn, label: "放大" },
           { icon: <Minus size={16} />, action: onZoomOut, label: "縮小" },
           { icon: <Maximize2 size={16} />, action: onFitAll, label: "顯示全圖" },
+          { icon: <LocateFixed size={16} />, action: onLocate, label: "定位" },
         ].map(({ icon, action, label }) => (
           <button
             key={label}

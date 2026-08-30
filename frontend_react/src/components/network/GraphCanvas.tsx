@@ -74,6 +74,8 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(function Gra
   const zoomRef = useRef<ZoomBehavior<HTMLCanvasElement, unknown> | null>(null);
   const rafRef = useRef<number | null>(null);
   const sizeRef = useRef<CanvasSize>({ width: 0, height: 0 });
+  // 縮放下限會依圖的實際大小自動放寬(見 fitBounds)
+  const dynamicMinZoomRef = useRef(minZoom);
 
   // callback 走 ref,避免 RAF 內的 stale closure(在 effect 中更新以符合 hooks 規範)
   const onRenderRef = useRef(onRender);
@@ -136,7 +138,7 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(function Gra
     if (!canvas) return;
 
     const zoomBehavior = d3zoom<HTMLCanvasElement, unknown>()
-      .scaleExtent([minZoom, maxZoom])
+      .scaleExtent([Math.min(minZoom, dynamicMinZoomRef.current), maxZoom])
       // 滾輪縮放靈敏度:d3 預設每格約 1.15 倍(全景到 1:1 要滾約 17 格,太慢)。
       // 乘上 WHEEL_ZOOM_FACTOR 後每格約 1.41 倍(7 格),與 +/- 按鈕的 1.4 一致。
       // 嫌快就調小、嫌慢就調大,只動這一個數字。
@@ -262,8 +264,13 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(function Gra
         const availW = w - rightInset;
         const boundsW = maxX - minX + padding * 2;
         const boundsH = maxY - minY + padding * 2;
-        let targetScale = Math.min(availW / boundsW, h / boundsH);
-        targetScale = Math.min(Math.max(targetScale, minZoom), 1.5);
+        const targetScale = Math.min(availW / boundsW, h / boundsH, 1.5);
+
+        // 圖比縮放下限還大時,自動放寬下限(留一半餘裕),保證全圖永遠裝得下、也縮得出去
+        if (targetScale < dynamicMinZoomRef.current) {
+          dynamicMinZoomRef.current = targetScale * 0.5;
+          zoomRef.current.scaleExtent([dynamicMinZoomRef.current, maxZoom]);
+        }
 
         const cx = (minX + maxX) / 2;
         const cy = (minY + maxY) / 2;
@@ -283,7 +290,7 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(function Gra
           );
       },
     }),
-    [requestRender, minZoom],
+    [requestRender, maxZoom],
   );
 
   return (
