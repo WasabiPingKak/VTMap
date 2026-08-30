@@ -19,6 +19,9 @@ import {
 } from "d3-zoom";
 import "d3-transition"; // side-effect import — 讓 Selection 支援 .transition()
 
+/** 滾輪縮放靈敏度倍率(相對 d3 預設):2.5 → 每格約 1.41 倍 */
+const WHEEL_ZOOM_FACTOR = 2.5;
+
 export interface CanvasTransform {
   x: number;
   y: number;
@@ -134,6 +137,16 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(function Gra
 
     const zoomBehavior = d3zoom<HTMLCanvasElement, unknown>()
       .scaleExtent([minZoom, maxZoom])
+      // 滾輪縮放靈敏度:d3 預設每格約 1.15 倍(全景到 1:1 要滾約 17 格,太慢)。
+      // 乘上 WHEEL_ZOOM_FACTOR 後每格約 1.41 倍(7 格),與 +/- 按鈕的 1.4 一致。
+      // 嫌快就調小、嫌慢就調大,只動這一個數字。
+      .wheelDelta(
+        (event: WheelEvent) =>
+          -event.deltaY *
+          (event.deltaMode === 1 ? 0.05 : event.deltaMode ? 1 : 0.002) *
+          WHEEL_ZOOM_FACTOR *
+          (event.ctrlKey ? 10 : 1),
+      )
       .on("zoom", (event) => {
         const t: ZoomTransform = event.transform;
         transformRef.current = { x: t.x, y: t.y, scale: t.k };
