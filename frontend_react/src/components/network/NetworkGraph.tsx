@@ -56,6 +56,27 @@ const NetworkGraph = forwardRef<NetworkGraphHandle, NetworkGraphProps>(function 
     focusedIdRef.current = focusedId;
   }, [focusedId]);
 
+  // 外框顏色的參考點:目前選取優先,其次圓心;BFS 兩層跳數
+  const referenceId = focusedId ?? egoCenterId;
+  const hopDistances = useMemo(() => {
+    if (!referenceId || !layout.byId.has(referenceId)) return null;
+    const distances = new Map<string, number>([[referenceId, 0]]);
+    let frontier = [referenceId];
+    for (let hop = 1; hop <= 2; hop++) {
+      const next: string[] = [];
+      for (const id of frontier) {
+        for (const neighbor of layout.neighbors.get(id) ?? []) {
+          if (!distances.has(neighbor)) {
+            distances.set(neighbor, hop);
+            next.push(neighbor);
+          }
+        }
+      }
+      frontier = next;
+    }
+    return distances;
+  }, [layout, referenceId]);
+
   const onRender = useCallback(
     (ctx: CanvasRenderingContext2D, transform: CanvasTransform, size: { width: number; height: number }) => {
       const focused = focusedIdRef.current;
@@ -65,12 +86,13 @@ const NetworkGraph = forwardRef<NetworkGraphHandle, NetworkGraphProps>(function 
         hoveredId: hoveredIdRef.current,
         focusedId: focused,
         highlightIds: focused ? (layout.neighbors.get(focused) ?? new Set()) : null,
+        hopDistances,
         starField,
         requestImage,
       };
       drawNetwork(ctx, transform, size.width, size.height, state);
     },
-    [layout, starField, imagesRef, requestImage],
+    [layout, hopDistances, starField, imagesRef, requestImage],
   );
 
   const onHover = useCallback(
@@ -135,6 +157,16 @@ const NetworkGraph = forwardRef<NetworkGraphHandle, NetworkGraphProps>(function 
     const { minX, minY, maxX, maxY } = layout.bounds;
     // 等 canvas 完成第一次 resize
     requestAnimationFrame(() => canvasRef.current?.fitBounds(minX, minY, maxX, maxY));
+  }, [layout]);
+
+  // 每次 layout 更新(含資料背景刷新)都確保縮放下限容得下整張圖,
+  // 不依賴 fitBounds 是否被呼叫(修正:SPA 導頁進來時下限沒放寬的問題)
+  useEffect(() => {
+    if (!layout.nodes.length) return;
+    const { minX, minY, maxX, maxY } = layout.bounds;
+    requestAnimationFrame(() =>
+      canvasRef.current?.ensureBoundsZoomable(minX, minY, maxX, maxY),
+    );
   }, [layout]);
 
   // ego 圓心切換:相機 fit 到兩環範圍(外圍淡化節點不納入取景)
