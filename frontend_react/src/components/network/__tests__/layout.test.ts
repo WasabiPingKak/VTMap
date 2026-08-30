@@ -209,6 +209,60 @@ describe("computeLayout ego 模式", () => {
     expect(layout.rings).toBeNull();
   });
 
+  it("大量外圍節點形成有間隔的外殼,不擠壞 ego 結構", () => {
+    // 圓心只有 3 個直接關係,但圖上有 300 個無關節點(重現線上災情)
+    const nodes = [
+      { channel_id: "UC_hub", title: "圓心", handle: null, thumbnail: null, in_vtmap: true },
+      ...["A", "B", "C"].map((id) => ({
+        channel_id: `UC_${id}`,
+        title: `關係人${id}`,
+        handle: null,
+        thumbnail: null,
+        in_vtmap: true,
+      })),
+      ...Array.from({ length: 300 }, (_, i) => ({
+        channel_id: `UC_far${i}`,
+        title: `無關頻道${i}`,
+        handle: null,
+        thumbnail: null,
+        in_vtmap: false,
+      })),
+    ];
+    const edges = [
+      ...["A", "B", "C"].map((id) => ({
+        a: "UC_hub",
+        b: `UC_${id}`,
+        evidence_count: 3,
+        last_seen_video_at: null,
+        evidence: [],
+      })),
+      // 無關節點自成一串,彼此相連但不連到圓心
+      ...Array.from({ length: 299 }, (_, i) => ({
+        a: `UC_far${i}`,
+        b: `UC_far${i + 1}`,
+        evidence_count: 1,
+        last_seen_video_at: null,
+        evidence: [],
+      })),
+    ];
+
+    const layout = computeLayout({ nodes, edges }, undefined, { centerId: "UC_hub" });
+    const dist = (id: string) => {
+      const n = layout.byId.get(id)!;
+      return Math.hypot(n.x, n.y);
+    };
+
+    const maxEgoRadius = Math.max(dist("UC_A"), dist("UC_B"), dist("UC_C"));
+    const outerDistances = Array.from({ length: 300 }, (_, i) => dist(`UC_far${i}`));
+    const minOuter = Math.min(...outerDistances);
+
+    // 外殼與 ego 結構之間保有明顯空隙
+    expect(minOuter).toBeGreaterThan(maxEgoRadius + 150);
+    // 外圍分散在多個子環上(不是全部疊在同一圈被炸開)
+    const outerRingBuckets = new Set(outerDistances.map((d) => Math.round(d / 70)));
+    expect(outerRingBuckets.size).toBeGreaterThan(2);
+  });
+
   it("ego 模式同樣保證「節點+下方標籤」零重疊", () => {
     const nodes = Array.from({ length: 15 }, (_, i) => ({
       channel_id: `UC_${i}`,
