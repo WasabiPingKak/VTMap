@@ -89,6 +89,7 @@ const NetworkGraph = forwardRef<NetworkGraphHandle, NetworkGraphProps>(function 
         hopDistances,
         starField,
         requestImage,
+        requestRepaint: () => canvasRef.current?.requestRender(),
       };
       drawNetwork(ctx, transform, size.width, size.height, state);
     },

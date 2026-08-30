@@ -61,6 +61,8 @@ export interface RenderState {
   starField: { x: number; y: number; r: number; alpha: number }[];
   /** 要求載入頭像(延遲載入);未提供時不載圖 */
   requestImage?: (url: string) => void;
+  /** sprite 生成限額用盡時要求下一幀重繪(漸進補齊) */
+  requestRepaint?: () => void;
 }
 
 export function createStarField(count = 260, spread = 2600) {
@@ -95,10 +97,16 @@ const SPRITE_SCALE = 2;
 /** sprite 內容外擴(光暈用) */
 const SPRITE_PAD = 16;
 const SPRITE_HALF = HEX_RADIUS + SPRITE_PAD;
-// 每個節點最多四種距離色變體,快取上限要涵蓋(節點數 × 變體數)
-const MAX_SPRITE_CACHE = 8000;
+// 頭像 sprite 每節點最多兩種變體(有/無頭像),與顏色無關
+const MAX_SPRITE_CACHE = 5000;
+
+/** 每幀允許新建的 sprite 數(超過的下一幀補,消除一次性生成尖峰) */
+const SPRITE_BUDGET_PER_FRAME = 64;
+let spriteBudget = SPRITE_BUDGET_PER_FRAME;
+let spriteBudgetExhausted = false;
 
 const nodeSpriteCache = new Map<string, HTMLCanvasElement>();
+const glowSpriteCache = new Map<string, HTMLCanvasElement | null>();
 const haloSpriteCache = new Map<number, HTMLCanvasElement | null>();
 
 function createSpriteCanvas(size: number): CanvasRenderingContext2D | null {
@@ -109,41 +117,64 @@ function createSpriteCanvas(size: number): CanvasRenderingContext2D | null {
   return canvas.getContext("2d");
 }
 
-/** 節點 sprite:光暈 + 六角底 + 頭像(或首字)+ 邊框,一次畫好之後重複 blit */
+/** 光暈 sprite:每種狀態色一張,全部節點共用(shadowBlur 只付四次) */
+function getGlowSprite(glow: string): HTMLCanvasElement | null {
+  const cached = glowSpriteCache.get(glow);
+  if (cached !== undefined) return cached;
+
+  const size = SPRITE_HALF * 2 * SPRITE_SCALE;
+  const spriteCtx = createSpriteCanvas(size);
+  if (!spriteCtx) {
+    glowSpriteCache.set(glow, null);
+    return null;
+  }
+  spriteCtx.scale(SPRITE_SCALE, SPRITE_SCALE);
+  spriteCtx.translate(SPRITE_HALF, SPRITE_HALF);
+  spriteCtx.shadowColor = glow;
+  spriteCtx.shadowBlur = 12;
+  hexPath(spriteCtx, 0, 0, HEX_RADIUS);
+  spriteCtx.fillStyle = BG_CENTER;
+  spriteCtx.fill();
+  glowSpriteCache.set(glow, spriteCtx.canvas);
+  return spriteCtx.canvas;
+}
+
+/** 節點 sprite:六角底 + 頭像(或首字)。與狀態色無關,變色不需重生。 */
 function getNodeSprite(
   node: LayoutNode,
-  color: string,
-  glow: string,
   img: HTMLImageElement | undefined,
 ): HTMLCanvasElement | null {
-  const key = `${node.node.channel_id}|${color}|${img ? "img" : "txt"}`;
+  const key = `${node.node.channel_id}|${img ? "img" : "txt"}`;
   const cached = nodeSpriteCache.get(key);
   if (cached) return cached;
+
+  if (spriteBudget <= 0) {
+    spriteBudgetExhausted = true;
+    return null;
+  }
 
   const size = SPRITE_HALF * 2 * SPRITE_SCALE;
   const spriteCtx = createSpriteCanvas(size);
   if (!spriteCtx) return null;
+  spriteBudget -= 1;
 
   spriteCtx.scale(SPRITE_SCALE, SPRITE_SCALE);
   spriteCtx.translate(SPRITE_HALF, SPRITE_HALF);
   const r = HEX_RADIUS;
 
-  // 光暈(sprite 生成時付一次 shadowBlur 成本)
-  spriteCtx.save();
-  spriteCtx.shadowColor = glow;
-  spriteCtx.shadowBlur = 12;
-  hexPath(spriteCtx, 0, 0, r);
-  spriteCtx.fillStyle = BG_CENTER;
-  spriteCtx.fill();
-  spriteCtx.restore();
-
   if (img) {
+    hexPath(spriteCtx, 0, 0, r - 2);
+    spriteCtx.fillStyle = BG_CENTER;
+    spriteCtx.fill();
     spriteCtx.save();
     hexPath(spriteCtx, 0, 0, r - 2);
     spriteCtx.clip();
     spriteCtx.drawImage(img, -r, -r, r * 2, r * 2);
     spriteCtx.restore();
   } else {
+    hexPath(spriteCtx, 0, 0, r - 2);
+    spriteCtx.fillStyle = BG_CENTER;
+    spriteCtx.fill();
     hexPath(spriteCtx, 0, 0, r - 2);
     spriteCtx.fillStyle = "rgba(255,255,255,0.06)";
     spriteCtx.fill();
@@ -153,11 +184,6 @@ function getNodeSprite(
     spriteCtx.textBaseline = "middle";
     spriteCtx.fillText(channelInitial(node.node), 0, 1);
   }
-
-  hexPath(spriteCtx, 0, 0, r);
-  spriteCtx.strokeStyle = color;
-  spriteCtx.lineWidth = 2;
-  spriteCtx.stroke();
 
   if (nodeSpriteCache.size >= MAX_SPRITE_CACHE) nodeSpriteCache.clear();
   const canvas = spriteCtx.canvas;
@@ -174,6 +200,12 @@ function getLabelSprite(node: LayoutNode): HTMLCanvasElement | null {
   const key = node.node.channel_id;
   const cached = labelSpriteCache.get(key);
   if (cached !== undefined) return cached;
+
+  if (spriteBudget <= 0) {
+    spriteBudgetExhausted = true;
+    return null;
+  }
+  spriteBudget -= 1;
 
   const worstFont = FONT_BASE / FONT_MIN_SCALE;
   const lineHeight = worstFont * LINE_HEIGHT_RATIO;
@@ -319,6 +351,8 @@ export function drawNetwork(
   state: RenderState,
 ) {
   const frameStart = import.meta.env.DEV ? performance.now() : 0;
+  spriteBudget = SPRITE_BUDGET_PER_FRAME;
+  spriteBudgetExhausted = false;
   const dpr = window.devicePixelRatio || 1;
   const width = sizeWidth / dpr;
   const height = sizeHeight / dpr;
@@ -460,7 +494,19 @@ export function drawNetwork(
       if (!img) state.requestImage?.(node.node.thumbnail);
     }
 
-    const sprite = getNodeSprite(node, color, glow, img);
+    // 光暈(依狀態色共用 sprite)
+    const glowSprite = getGlowSprite(glow);
+    if (glowSprite) {
+      ctx.drawImage(
+        glowSprite,
+        node.x - SPRITE_HALF,
+        node.y - SPRITE_HALF,
+        SPRITE_HALF * 2,
+        SPRITE_HALF * 2,
+      );
+    }
+
+    const sprite = getNodeSprite(node, img);
     if (sprite) {
       ctx.drawImage(
         sprite,
@@ -470,7 +516,7 @@ export function drawNetwork(
         SPRITE_HALF * 2,
       );
     } else {
-      // 無法建立 sprite(測試環境等):直接繪製
+      // sprite 尚未生成(限額中)或測試環境:直接繪製簡化版
       const r = HEX_RADIUS;
       hexPath(ctx, node.x, node.y, r - 2);
       ctx.fillStyle = BG_CENTER;
@@ -480,19 +526,13 @@ export function drawNetwork(
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
       ctx.fillText(channelInitial(node.node), node.x, node.y + 1);
-      hexPath(ctx, node.x, node.y, r);
-      ctx.strokeStyle = color;
-      ctx.lineWidth = 2;
-      ctx.stroke();
     }
 
-    // hover 強調:外圈加粗邊框(單一節點,成本可忽略)
-    if (hovered) {
-      hexPath(ctx, node.x, node.y, HEX_RADIUS + 2);
-      ctx.strokeStyle = color;
-      ctx.lineWidth = 3;
-      ctx.stroke();
-    }
+    // 狀態色邊框(每幀直接畫,變色不需重生 sprite)
+    hexPath(ctx, node.x, node.y, HEX_RADIUS);
+    ctx.strokeStyle = color;
+    ctx.lineWidth = hovered ? 3 : 2;
+    ctx.stroke();
   });
   ctx.globalAlpha = 1;
 
@@ -501,6 +541,11 @@ export function drawNetwork(
     drawLabels(ctx, scale, state, visible);
   }
   ctx.restore();
+
+  // sprite 沒生完:下一幀接著補
+  if (spriteBudgetExhausted) {
+    state.requestRepaint?.();
+  }
 
   if (import.meta.env.DEV) {
     recordFrameTime(performance.now() - frameStart);
