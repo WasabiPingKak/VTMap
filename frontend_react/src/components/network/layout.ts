@@ -1,8 +1,10 @@
 /**
- * 關係網路 layout:ForceAtlas2(LinLog + 邊權重)——Gephi 生態的標準做法,
- * 讓關係緊密的社群自然聚攏、群間拉開,搭配 Louvain 社群偵測上色。
- * 之後做「矩形分離」後處理,保證「節點 + 下方標籤」互不重疊
- * (做法參考 VTaxon,邊長允許不均勻)。
+ * 關係網路 layout:d3-force 力導向,同步跑完 simulation 後再做「矩形分離」
+ * 後處理,保證「節點 + 下方標籤」互不重疊(做法參考 VTaxon,邊長允許不均勻)。
+ *
+ * 刻意不用 ForceAtlas2:它的 linLog + strong gravity 會把整張圖壓成密實的
+ * 圓盤,群組的相對關係在視覺上被抹平。d3-force 的斥力與連線距離讓圖自然
+ * 攤開成有枝幹的形狀,看得出誰跟誰成群。
  *
  * ego 模式(指定圓心)不改變任何節點位置:同一張力導向佈局上,
  * 以 BFS 分環(圓心=0、直接關係人=1、間接=2、其餘=3 外圍淡化)決定
@@ -10,14 +12,22 @@
  * 使用者的空間記憶得以保留。
  */
 
-import forceAtlas2 from "graphology-layout-forceatlas2";
+import {
+  forceCollide,
+  forceLink,
+  forceManyBody,
+  forceSimulation,
+  forceX,
+  forceY,
+} from "d3-force";
+import type { SimulationNodeDatum } from "d3-force";
 import type {
   GraphLayout,
   LayoutEdge,
   LayoutNode,
   NetworkGraphData,
 } from "@/types/network";
-import { buildGraph, detectCommunities } from "./communities";
+import { detectCommunities } from "./communities";
 import { channelDisplayName } from "./displayName";
 import {
   computeLabelMetrics,
@@ -27,15 +37,16 @@ import {
 } from "./labelMetrics";
 import { resolveRectCollisions, type FootprintNode } from "./rectSeparation";
 
+interface SimNode extends SimulationNodeDatum {
+  id: string;
+}
+
 export interface EgoOptions {
   centerId: string;
 }
 
 /** 外圍(與圓心兩層內無關)的環編號 */
 export const EGO_OUTER_RING = 3;
-
-/** 縮放的目標:有連線的節點對之間的中位數距離 */
-const TARGET_LINKED_DISTANCE = 180;
 
 function buildAdjacency(data: NetworkGraphData): Map<string, Set<string>> {
   const adjacency = new Map<string, Set<string>>();
@@ -77,70 +88,43 @@ function assignRings(
   return rings;
 }
 
-/** 穩定的偽隨機角度(力導向的初始位置用) */
-function hashAngle(id: string): number {
-  let hash = 0;
-  for (let i = 0; i < id.length; i++) {
-    hash = (hash * 31 + id.charCodeAt(i)) | 0;
-  }
-  return ((hash >>> 0) % 3600) * (Math.PI / 1800);
-}
+/**
+ * d3-force 力導向:連線把認識的人拉近、斥力把不相干的人推開,
+ * 座標本身就是世界尺度(連線基準距離 170),不需要事後正規化。
+ */
+function computeForcePositions(
+  data: NetworkGraphData,
+  metrics: { halfWidth: number }[],
+): { x: number; y: number }[] {
+  const simNodes: SimNode[] = data.nodes.map((n) => ({ id: n.channel_id }));
+  const nodeIds = new Set(simNodes.map((n) => n.id));
+  const simLinks = data.edges
+    .filter((e) => nodeIds.has(e.a) && nodeIds.has(e.b))
+    .map((e) => ({ source: e.a, target: e.b, evidence: e.evidence_count }));
 
-/** ForceAtlas2:社群自然聚攏 */
-function computeForcePositions(data: NetworkGraphData): { x: number; y: number }[] {
-  const graph = buildGraph(data);
-  // 固定的初始位置,確保結果可重現
-  data.nodes.forEach((n, i) => {
-    const angle = hashAngle(n.channel_id);
-    const radius = 60 + ((i * 137) % 400);
-    graph.setNodeAttribute(n.channel_id, "x", Math.cos(angle) * radius);
-    graph.setNodeAttribute(n.channel_id, "y", Math.sin(angle) * radius);
-  });
+  const sim = forceSimulation(simNodes)
+    .force(
+      "link",
+      forceLink(simLinks)
+        .id((d) => (d as SimNode).id)
+        // 證據越多的關係拉得越近;基準距離要容得下上下兩組「節點+標籤」
+        .distance((l) => 170 - Math.min(40, (l as { evidence: number }).evidence * 8))
+        .strength(0.5),
+    )
+    .force("charge", forceManyBody().strength(-420))
+    // 用標籤半寬當碰撞半徑,先在 force 階段撐開水平空間
+    .force(
+      "collide",
+      forceCollide((_d, i) => Math.max(metrics[i].halfWidth, HEX_RADIUS) + 12),
+    )
+    .force("x", forceX(0).strength(0.05))
+    .force("y", forceY(0).strength(0.05))
+    .stop();
 
-  if (graph.size > 0) {
-    forceAtlas2.assign(graph, {
-      iterations: 300,
-      getEdgeWeight: "weight",
-      settings: {
-        linLogMode: true,
-        // strong gravity:把互不相連的小群往中心收攏,避免孤島飛太遠
-        gravity: 1,
-        strongGravityMode: true,
-        scalingRatio: 6,
-        edgeWeightInfluence: 1,
-        barnesHutOptimize: graph.order > 200,
-      },
-    });
-  }
+  const ticks = Math.ceil(Math.log(sim.alphaMin()) / Math.log(1 - sim.alphaDecay()));
+  sim.tick(ticks);
 
-  const positions = data.nodes.map((n) => ({
-    x: graph.getNodeAttribute(n.channel_id, "x") as number,
-    y: graph.getNodeAttribute(n.channel_id, "y") as number,
-  }));
-
-  // FA2 輸出尺度不固定,縮放到「有連線的節點對中位數距離 = 目標值」
-  const indexById = new Map(data.nodes.map((n, i) => [n.channel_id, i]));
-  const linkedDistances: number[] = [];
-  for (const edge of data.edges) {
-    const a = indexById.get(edge.a);
-    const b = indexById.get(edge.b);
-    if (a === undefined || b === undefined) continue;
-    linkedDistances.push(
-      Math.hypot(positions[a].x - positions[b].x, positions[a].y - positions[b].y),
-    );
-  }
-  if (linkedDistances.length) {
-    linkedDistances.sort((x, y) => x - y);
-    const median = linkedDistances[Math.floor(linkedDistances.length / 2)];
-    if (median > 0) {
-      const scale = Math.min(Math.max(TARGET_LINKED_DISTANCE / median, 0.3), 20);
-      for (const p of positions) {
-        p.x *= scale;
-        p.y *= scale;
-      }
-    }
-  }
-  return positions;
+  return simNodes.map((sn) => ({ x: sn.x ?? 0, y: sn.y ?? 0 }));
 }
 
 /**
@@ -156,7 +140,7 @@ const basisCache = new WeakMap<NetworkGraphData, LayoutBasis>();
 
 function computeBasis(data: NetworkGraphData, measureFn: MeasureFn): LayoutBasis {
   const metrics = data.nodes.map((n) => computeLabelMetrics(channelDisplayName(n), measureFn));
-  const positions = computeForcePositions(data);
+  const positions = computeForcePositions(data, metrics);
 
   // 矩形分離:保證「節點 + 下方標籤」零重疊
   const footprints: FootprintNode[] = positions.map((p, i) => ({

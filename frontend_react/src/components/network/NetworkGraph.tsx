@@ -11,10 +11,14 @@ import {
   useRef,
 } from "react";
 import GraphCanvas, { type GraphCanvasHandle, type CanvasTransform } from "./GraphCanvas";
-import { computeLayout } from "./layout";
+import { computeLayout, EGO_OUTER_RING } from "./layout";
+import { HEX_RADIUS } from "./labelMetrics";
 import { createStarField, drawNetwork, hitTest, type RenderState } from "./renderers";
 import { useImageCache } from "./useImageCache";
 import type { NetworkGraphData } from "@/types/network";
+
+/** ego 取景的縮放下限:低於此值節點會退化成圓點、標籤也不畫 */
+const EGO_MIN_SCALE = 0.5;
 
 interface NetworkGraphProps {
   data: NetworkGraphData;
@@ -171,31 +175,45 @@ const NetworkGraph = forwardRef<NetworkGraphHandle, NetworkGraphProps>(function 
     );
   }, [layout]);
 
-  // ego 圓心切換:相機 fit 到「圓心 + 直接關係人」。
-  // 位置是力導向的有機佈局,間接關係散佈範圍常常接近整張圖,
-  // 納入取景會把視野拉到最遠、什麼都看不清,所以只框第一層。
+  // ego 圓心切換:相機取景以圓心為正中心,範圍取到最遠的直接關係人。
+  // 位置是力導向的有機佈局,間接關係散佈範圍常常接近整張圖,納入取景
+  // 會把視野拉到最遠、什麼都看不清,所以只看第一層;第一層也可能很遠
+  // (極端:唯一的關係人在圖的另一頭),所以再守一個可讀的縮放下限。
   const prevEgoRef = useRef<string | null>(null);
   useEffect(() => {
     if (prevEgoRef.current === egoCenterId) return;
     prevEgoRef.current = egoCenterId;
     if (!layout.nodes.length) return;
 
-    let minX = Infinity;
-    let minY = Infinity;
-    let maxX = -Infinity;
-    let maxY = -Infinity;
+    const center = egoCenterId ? layout.byId.get(egoCenterId) : null;
+    if (!center) return;
+
+    // 以圓心為原點的對稱半徑,確保圓心落在畫面正中
+    let halfW = 0;
+    let halfH = 0;
     for (const n of layout.nodes) {
-      if (layout.rings && (layout.rings.get(n.node.channel_id) ?? 0) >= 2) continue;
-      minX = Math.min(minX, n.x - n.labelHalfWidth);
-      maxX = Math.max(maxX, n.x + n.labelHalfWidth);
-      minY = Math.min(minY, n.y - 22);
-      maxY = Math.max(maxY, n.y + n.labelBottomHeight);
+      if ((layout.rings?.get(n.node.channel_id) ?? EGO_OUTER_RING) >= 2) continue;
+      halfW = Math.max(halfW, Math.abs(n.x - center.x) + n.labelHalfWidth);
+      halfH = Math.max(
+        halfH,
+        Math.abs(n.y - center.y) + Math.max(HEX_RADIUS, n.labelBottomHeight),
+      );
     }
-    if (!Number.isFinite(minX)) {
-      ({ minX, minY, maxX, maxY } = layout.bounds);
-    }
-    // 等 canvas 完成第一次 resize(直接帶網址進頁時 mount 當下尺寸還是 0)
-    requestAnimationFrame(() => canvasRef.current?.fitBounds(minX, minY, maxX, maxY));
+    // 沒有任何直接關係人時給一個最小視野,不要無限放大
+    halfW = Math.max(halfW, 200);
+    halfH = Math.max(halfH, 200);
+
+    requestAnimationFrame(() =>
+      canvasRef.current?.fitBounds(
+        center.x - halfW,
+        center.y - halfH,
+        center.x + halfW,
+        center.y + halfH,
+        80,
+        0,
+        { minScale: EGO_MIN_SCALE, focusX: center.x, focusY: center.y },
+      ),
+    );
   }, [egoCenterId, layout]);
 
   // 聚焦變化:相機移過去 + 重繪
