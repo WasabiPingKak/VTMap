@@ -52,7 +52,7 @@ export default function NetworkToolbar({
           />
         </div>
         {matches.length > 0 && (
-          <ul className="absolute mt-1 w-full rounded-lg bg-slate-950/95 border border-slate-800 overflow-hidden">
+          <ul className="absolute z-20 mt-1 w-full rounded-lg bg-slate-950/95 border border-slate-800 overflow-hidden">
             {matches.map((n) => (
               <li key={n.channel_id}>
                 <button
