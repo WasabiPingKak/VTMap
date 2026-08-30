@@ -74,6 +74,7 @@ _AGE_RESTRICTED_MARKERS = ("confirm your age",)
 _UNAVAILABLE_MARKERS = (
     "video unavailable",
     "this video is unavailable",
+    "this video is not available",
     "private video",
     "this video is private",
 )

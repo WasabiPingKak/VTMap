@@ -30,6 +30,12 @@ def test_classify_download_error_detects_age_restricted():
     assert ytdlp.classify_download_error(stderr) == "age_restricted"
 
 
+def test_classify_download_error_detects_not_available():
+    stderr = "ERROR: [youtube] abc123: This video is not available"
+
+    assert ytdlp.classify_download_error(stderr) == "video_unavailable"
+
+
 def test_classify_download_error_returns_none_for_transient_error():
     stderr = "ERROR: [youtube] abc123: HTTP Error 503: Service Unavailable"
 
