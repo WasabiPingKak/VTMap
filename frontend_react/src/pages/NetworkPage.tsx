@@ -58,6 +58,15 @@ export default function NetworkPage() {
 
   const centerNode = centerId ? data?.nodes.find((n) => n.channel_id === centerId) : null;
 
+  // 定位:圓心 > 選取節點 > 自己的頻道(已登入且在圖上)> 顯示全圖
+  const handleLocate = useCallback(() => {
+    const candidates = [centerId, focusedId, me?.channelId];
+    for (const id of candidates) {
+      if (id && graphRef.current?.panToNode(id)) return;
+    }
+    graphRef.current?.fitAll();
+  }, [centerId, focusedId, me?.channelId]);
+
   return (
     <div className="fixed inset-0 overflow-hidden bg-[#080d15]">
       {isLoading && (
@@ -91,6 +100,7 @@ export default function NetworkPage() {
             onZoomIn={() => graphRef.current?.zoomIn()}
             onZoomOut={() => graphRef.current?.zoomOut()}
             onFitAll={() => graphRef.current?.fitAll()}
+            onLocate={handleLocate}
           />
           <NetworkLegend />
           {centerNode && (

@@ -30,6 +30,8 @@ export interface NetworkGraphHandle {
   zoomIn: () => void;
   zoomOut: () => void;
   fitAll: () => void;
+  /** 相機移到指定頻道(不存在時無動作),回傳是否找到 */
+  panToNode: (channelId: string) => boolean;
 }
 
 const NetworkGraph = forwardRef<NetworkGraphHandle, NetworkGraphProps>(function NetworkGraph(
@@ -178,8 +180,15 @@ const NetworkGraph = forwardRef<NetworkGraphHandle, NetworkGraphProps>(function 
         const { minX, minY, maxX, maxY } = layout.bounds;
         canvasRef.current?.fitBounds(minX, minY, maxX, maxY);
       },
+      panToNode: (channelId: string) => {
+        const node = layout.byId.get(channelId);
+        if (!node) return false;
+        const scale = Math.max(canvasRef.current?.getTransform().scale ?? 1, 0.9);
+        canvasRef.current?.panTo(node.x, node.y, scale, panelInset);
+        return true;
+      },
     }),
-    [layout],
+    [layout, panelInset],
   );
 
   return <GraphCanvas ref={canvasRef} onRender={onRender} onHover={onHover} onClick={onClick} />;
