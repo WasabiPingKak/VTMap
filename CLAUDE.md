@@ -15,7 +15,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 │   │   ├── video_analyzer/    # Video classification by title keywords
 │   │   ├── trending/          # Trending channel/game analytics
 │   │   ├── live_redirect/     # Live stream caching and routing
-│   │   └── heatmap/           # Active time visualization
+│   │   ├── heatmap/           # Active time visualization
+│   │   └── network/           # VTuber 關係網路查詢（Supabase Postgres）
+│   ├── crawler/               # 關係網路爬蟲 CLI（本機執行，見 crawler/README.md）
 │   └── utils/                 # Shared utilities
 │
 ├── frontend_react/
@@ -26,6 +28,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 │   │   │   ├── chart/         # 圖表元件（圓餅/長條/Treemap/Heatmap）
 │   │   │   ├── channels/      # 頻道列表頁面元件
 │   │   │   ├── common/        # 共用元件（VideoCard, ChannelInfoCard 等）
+│   │   │   ├── network/       # 關係網路圖（Canvas 渲染、layout、圓心檢視）
 │   │   │   └── skeleton/      # Skeleton 載入佔位元件
 │   │   ├── hooks/             # Custom React hooks
 │   │   ├── stores/            # Zustand state stores
@@ -33,10 +36,19 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 │   │   └── utils/             # Utility functions
 │   └── public/                # Static assets
 │
+├── supabase/
+│   └── migrations/            # Supabase Postgres migrations（schema 由 search_path 決定：staging/public）
 ├── docs/
 │   └── adr/                   # Architecture Decision Records
 └── .github/workflows/         # CI/CD pipelines
 ```
+
+### 關係網路（/network）
+
+資料庫在 Supabase Postgres（與 Firestore 並存，`staging`/`public` schema 分環境）。
+聊天室資料統一由 `backend/crawler/` 以 yt-dlp 爬取（不用 YouTube API quota），
+本機執行；後端 `/api/network/*` 讀 Supabase（需 `SUPABASE_DB_URL`）。
+詳見 `backend/crawler/README.md`。
 
 ## Development Commands
 
