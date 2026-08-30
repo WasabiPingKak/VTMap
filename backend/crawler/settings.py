@@ -15,6 +15,9 @@ DB_SCHEMA = os.getenv("CRAWLER_DB_SCHEMA", "staging")
 # 每個頻道回溯的直播 VOD 數
 BACKFILL_VIDEOS_PER_CHANNEL = int(os.getenv("CRAWLER_BACKFILL_VIDEOS", "10"))
 
+# 列表階段的掃描倍率:會員限定與進行中的直播會被濾掉,多掃幾部才補得滿回溯額度
+LIST_SCAN_MULTIPLIER = int(os.getenv("CRAWLER_LIST_SCAN_MULTIPLIER", "3"))
+
 # 擴張深度上限:crawl_depth <= 此值的合格頻道才會被排入 list_videos
 # (種子 = 0,種子的管理員 = 1;預設爬到 1,節點最遠長到 2)
 MAX_CRAWL_DEPTH = int(os.getenv("CRAWLER_MAX_DEPTH", "1"))

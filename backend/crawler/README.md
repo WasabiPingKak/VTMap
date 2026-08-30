@@ -36,12 +36,17 @@ python -m crawler serve --port 5001                # 前端開發用迷你 API s
 ## 管線流程
 
 ```
-seed(收錄頻道, depth=0) → list_videos(近 10 部直播 VOD)
+seed(收錄頻道, depth=0) → list_videos(近 10 部抓得到的直播 VOD)
   → fetch_chat(yt-dlp 下載 replay → 解析 badge)
       → 寫入 chat_badge_observations + 新頻道入 channels(depth+1)
       → check_qualification(檢查「曾經有直播紀錄」准入規則)
           → 合格且 depth <= CRAWLER_MAX_DEPTH → 排回 list_videos(往外擴張)
 ```
+
+`list_videos` 會掃描 `CRAWLER_BACKFILL_VIDEOS × CRAWLER_LIST_SCAN_MULTIPLIER` 部,
+在列表階段就濾掉會員限定(`availability` 為 `subscriber_only` 等)與進行中/預定的
+直播,再取前 N 部排入 fetch_chat。這樣回溯額度不會被抓不到的影片佔掉,代價是
+會員限定比例高的頻道會回溯到較舊的直播。
 
 邊(`network_edges` view)由觀察資料即時推導:雙方非同一頻道、author 通過准入、
 非 bot 的管理員關係,正規化為無向(channel_a < channel_b)。調整准入規則只需改
@@ -54,6 +59,7 @@ view,不需重爬。
 | `SUPABASE_DB_URL` | 讀 `.env.local` | Postgres 連線字串 |
 | `CRAWLER_DB_SCHEMA` | `staging` | 目標 schema;production 設 `public` |
 | `CRAWLER_BACKFILL_VIDEOS` | 10 | 每頻道回溯 VOD 數 |
+| `CRAWLER_LIST_SCAN_MULTIPLIER` | 3 | 列表掃描倍率(掃 10×3 部,濾掉抓不到的取前 10) |
 | `CRAWLER_MAX_DEPTH` | 1 | 擴張深度上限(種子=0) |
 | `CRAWLER_TASK_SLEEP` | 6 | 任務間隔秒數(另加隨機抖動) |
 | `YOUTUBE_API_KEY` | 讀 `.env.local` | enrich-channels 用的 YouTube Data API key |

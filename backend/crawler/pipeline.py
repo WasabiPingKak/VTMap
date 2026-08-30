@@ -69,7 +69,7 @@ def add_manual_seed(conn: psycopg.Connection, channel_id: str) -> None:
 
 
 def process_list_videos(conn: psycopg.Connection, task: repo.Task) -> None:
-    """列出頻道最近的直播 VOD,排入 fetch_chat。"""
+    """列出頻道最近可抓的直播 VOD,排入 fetch_chat。"""
     assert task.channel_id is not None
     entries = ytdlp.list_recent_streams(task.channel_id, BACKFILL_VIDEOS_PER_CHANNEL)
     if entries is None:
@@ -78,8 +78,6 @@ def process_list_videos(conn: psycopg.Connection, task: repo.Task) -> None:
         return
 
     for entry in entries:
-        if entry.live_status in ("is_live", "is_upcoming"):
-            continue  # 進行中或預定直播沒有 replay
         repo.enqueue(
             conn, repo.KIND_FETCH_CHAT, channel_id=task.channel_id, video_id=entry.video_id
         )
