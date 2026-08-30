@@ -129,138 +129,33 @@ describe("computeLayout ego 模式", () => {
     expect(layout.rings?.get("UC_E")).toBe(EGO_OUTER_RING);
   });
 
-  it("圓心固定在原點,環半徑由內而外遞增", () => {
-    const layout = computeLayout(egoData, undefined, { centerId: "UC_A" });
-    const center = layout.byId.get("UC_A")!;
-    expect(Math.abs(center.x)).toBeLessThan(1);
-    expect(Math.abs(center.y)).toBeLessThan(1);
-
-    const dist = (id: string) => {
-      const n = layout.byId.get(id)!;
-      return Math.hypot(n.x - center.x, n.y - center.y);
-    };
-    expect(dist("UC_B")).toBeLessThan(dist("UC_C"));
-    expect(dist("UC_C")).toBeLessThan(dist("UC_D"));
+  it("ego 模式不重排世界:每個節點的座標與全圖模式完全一致", () => {
+    const plain = computeLayout(egoData);
+    const ego = computeLayout(egoData, undefined, { centerId: "UC_A" });
+    for (const id of ["UC_A", "UC_B", "UC_C", "UC_D", "UC_E"]) {
+      const a = plain.byId.get(`${id}`)!;
+      const b = ego.byId.get(`${id}`)!;
+      expect(b.x).toBeCloseTo(a.x, 6);
+      expect(b.y).toBeCloseTo(a.y, 6);
+    }
   });
 
-  it("第一層依關係強度分層:證據多的離圓心比較近", () => {
-    const nodes = [
-      { channel_id: "UC_hub", title: "圓心", handle: null, thumbnail: null, in_vtmap: true },
-      ...Array.from({ length: 24 }, (_, i) => ({
-        channel_id: `UC_n${i}`,
-        title: `關係人${i}`,
-        handle: null,
-        thumbnail: null,
-        in_vtmap: true,
-      })),
-    ];
-    // 證據數:i 越小越強
-    const edges = nodes.slice(1).map((n, i) => ({
-      a: "UC_hub",
-      b: n.channel_id,
-      evidence_count: 30 - i,
-      last_seen_video_at: null,
-      evidence: [],
-    }));
-
-    const layout = computeLayout({ nodes, edges }, undefined, { centerId: "UC_hub" });
-    const dist = (id: string) => {
-      const n = layout.byId.get(id)!;
-      return Math.hypot(n.x, n.y);
-    };
-
-    // 最強的一批比最弱的一批更靠近圓心
-    expect(dist("UC_n0")).toBeLessThan(dist("UC_n23"));
-    // 內圈維持在「頭像與名字可讀」的距離內
-    expect(dist("UC_n0")).toBeLessThan(400);
-  });
-
-  it("關係人多到單圈裝不下時分成多個子環", () => {
-    const nodes = [
-      { channel_id: "UC_hub", title: "圓心", handle: null, thumbnail: null, in_vtmap: true },
-      ...Array.from({ length: 40 }, (_, i) => ({
-        channel_id: `UC_m${i}`,
-        title: `很長的頻道名稱測試用${i}`,
-        handle: null,
-        thumbnail: null,
-        in_vtmap: true,
-      })),
-    ];
-    const edges = nodes.slice(1).map((n) => ({
-      a: "UC_hub",
-      b: n.channel_id,
-      evidence_count: 2,
-      last_seen_video_at: null,
-      evidence: [],
-    }));
-
-    const layout = computeLayout({ nodes, edges }, undefined, { centerId: "UC_hub" });
-    const radii = nodes
-      .slice(1)
-      .map((n) => layout.byId.get(n.channel_id)!)
-      .map((n) => Math.round(Math.hypot(n.x, n.y) / 50));
-    // 出現至少兩種不同的半徑量級 = 有分成多個子環
-    expect(new Set(radii).size).toBeGreaterThan(1);
+  it("換圓心不移動任何節點", () => {
+    const fromA = computeLayout(egoData, undefined, { centerId: "UC_A" });
+    const fromC = computeLayout(egoData, undefined, { centerId: "UC_C" });
+    for (const id of ["UC_A", "UC_B", "UC_C", "UC_D", "UC_E"]) {
+      expect(fromC.byId.get(id)!.x).toBeCloseTo(fromA.byId.get(id)!.x, 6);
+      expect(fromC.byId.get(id)!.y).toBeCloseTo(fromA.byId.get(id)!.y, 6);
+    }
+    // 分環仍隨圓心改變
+    expect(fromA.rings?.get("UC_C")).toBe(2);
+    expect(fromC.rings?.get("UC_C")).toBe(0);
   });
 
   it("圓心不存在時退回一般全圖模式", () => {
     const layout = computeLayout(egoData, undefined, { centerId: "UC_ghost" });
     expect(layout.egoCenterId).toBeNull();
     expect(layout.rings).toBeNull();
-  });
-
-  it("大量外圍節點形成有間隔的外殼,不擠壞 ego 結構", () => {
-    // 圓心只有 3 個直接關係,但圖上有 300 個無關節點(重現線上災情)
-    const nodes = [
-      { channel_id: "UC_hub", title: "圓心", handle: null, thumbnail: null, in_vtmap: true },
-      ...["A", "B", "C"].map((id) => ({
-        channel_id: `UC_${id}`,
-        title: `關係人${id}`,
-        handle: null,
-        thumbnail: null,
-        in_vtmap: true,
-      })),
-      ...Array.from({ length: 300 }, (_, i) => ({
-        channel_id: `UC_far${i}`,
-        title: `無關頻道${i}`,
-        handle: null,
-        thumbnail: null,
-        in_vtmap: false,
-      })),
-    ];
-    const edges = [
-      ...["A", "B", "C"].map((id) => ({
-        a: "UC_hub",
-        b: `UC_${id}`,
-        evidence_count: 3,
-        last_seen_video_at: null,
-        evidence: [],
-      })),
-      // 無關節點自成一串,彼此相連但不連到圓心
-      ...Array.from({ length: 299 }, (_, i) => ({
-        a: `UC_far${i}`,
-        b: `UC_far${i + 1}`,
-        evidence_count: 1,
-        last_seen_video_at: null,
-        evidence: [],
-      })),
-    ];
-
-    const layout = computeLayout({ nodes, edges }, undefined, { centerId: "UC_hub" });
-    const dist = (id: string) => {
-      const n = layout.byId.get(id)!;
-      return Math.hypot(n.x, n.y);
-    };
-
-    const maxEgoRadius = Math.max(dist("UC_A"), dist("UC_B"), dist("UC_C"));
-    const outerDistances = Array.from({ length: 300 }, (_, i) => dist(`UC_far${i}`));
-    const minOuter = Math.min(...outerDistances);
-
-    // 外殼與 ego 結構之間保有明顯空隙
-    expect(minOuter).toBeGreaterThan(maxEgoRadius + 150);
-    // 外圍分散在多個子環上(不是全部疊在同一圈被炸開)
-    const outerRingBuckets = new Set(outerDistances.map((d) => Math.round(d / 70)));
-    expect(outerRingBuckets.size).toBeGreaterThan(2);
   });
 
   it("ego 模式同樣保證「節點+下方標籤」零重疊", () => {
