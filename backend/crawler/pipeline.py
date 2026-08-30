@@ -265,9 +265,7 @@ def run_unattended(
     while time.monotonic() < deadline:
         try:
             with get_conn() as conn:
-                processed = run_queue(
-                    conn, max_tasks=maintain_every, sleep_seconds=sleep_seconds
-                )
+                processed = run_queue(conn, max_tasks=maintain_every, sleep_seconds=sleep_seconds)
             consecutive_failures = 0
         except Exception as e:
             consecutive_failures += 1
@@ -279,8 +277,9 @@ def run_unattended(
             continue
 
         total += processed
-        logger.info("已處理累計 %s 個任務,剩餘時間 %.1f 小時",
-                    total, (deadline - time.monotonic()) / 3600)
+        logger.info(
+            "已處理累計 %s 個任務,剩餘時間 %.1f 小時", total, (deadline - time.monotonic()) / 3600
+        )
 
         run_maintenance(youtube_api_key)
 

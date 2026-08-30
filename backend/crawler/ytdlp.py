@@ -37,9 +37,7 @@ class ChatDownloadResult:
 
 
 # 列表階段就看得出抓不到聊天室的 availability(會員限定、需登入、付費、私人)
-_UNFETCHABLE_AVAILABILITY = frozenset(
-    {"subscriber_only", "needs_auth", "premium_only", "private"}
-)
+_UNFETCHABLE_AVAILABILITY = frozenset({"subscriber_only", "needs_auth", "premium_only", "private"})
 
 
 def list_recent_streams(channel_id: str, limit: int) -> list[StreamEntry] | None:
