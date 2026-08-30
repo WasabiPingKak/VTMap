@@ -38,7 +38,7 @@ export default function NetworkToolbar({
   }, [query, data]);
 
   return (
-    <div className="absolute top-3 left-3 z-10 flex flex-col gap-2 w-60">
+    <div className="absolute top-16 left-3 z-10 flex flex-col gap-2 w-60">
       <div className="relative">
         <div className="flex items-center gap-2 rounded-lg bg-slate-950/80 backdrop-blur border border-slate-800 px-3 py-2">
           <Search size={14} className="text-slate-400 shrink-0" />
