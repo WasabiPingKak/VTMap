@@ -115,7 +115,9 @@ def download_live_chat(video_id: str, work_dir: Path) -> ChatDownloadResult:
     if proc.returncode != 0:
         skip_status = classify_download_error(proc.stderr)
         if skip_status:
-            return ChatDownloadResult(chat_path=None, published_at=None, title="", skip_status=skip_status)
+            return ChatDownloadResult(
+                chat_path=None, published_at=None, title="", skip_status=skip_status
+            )
         raise RuntimeError(f"yt-dlp 下載聊天室失敗:{proc.stderr.strip()[-500:]}")
 
     chat_path: Path | None = work_dir / f"{video_id}.live_chat.json"
