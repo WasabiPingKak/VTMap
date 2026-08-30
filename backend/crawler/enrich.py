@@ -1,4 +1,5 @@
-"""頻道資料補完:用 YouTube Data API channels.list 取得正式名稱、handle 與高解析頭像。
+"""頻道資料補完:用 YouTube Data API channels.list 取得正式名稱、handle、
+高解析頭像與訂閱數。
 
 channels.list 一次可查 50 個頻道、成本 1 unit,數百頻道只需個位數 units,
 與聊天室爬蟲的 quota 考量無關。
@@ -16,11 +17,15 @@ BATCH_SIZE = 50
 
 
 def parse_snippets(items: list[dict]) -> dict[str, dict]:
-    """把 channels.list 回應整理成 channel_id → {title, handle, thumbnail}。"""
+    """把 channels.list 回應整理成 channel_id → {title, handle, thumbnail, subscribers}。
+
+    subscribers:頻道隱藏訂閱數(hiddenSubscriberCount)或無資料時為 None。
+    """
     result: dict[str, dict] = {}
     for item in items:
         channel_id = item.get("id")
         snippet = item.get("snippet") or {}
+        statistics = item.get("statistics") or {}
         if not channel_id:
             continue
         thumbnails = snippet.get("thumbnails") or {}
@@ -30,10 +35,21 @@ def parse_snippets(items: list[dict]) -> dict[str, dict]:
             if url:
                 thumbnail = url
                 break
+
+        subscribers: int | None = None
+        if not statistics.get("hiddenSubscriberCount"):
+            raw = statistics.get("subscriberCount")
+            if raw is not None:
+                try:
+                    subscribers = int(raw)
+                except (TypeError, ValueError):
+                    subscribers = None
+
         result[channel_id] = {
             "title": snippet.get("title") or None,
             "handle": snippet.get("customUrl") or None,  # 形如 @xxx
             "thumbnail": thumbnail,
+            "subscribers": subscribers,
         }
     return result
 
@@ -42,7 +58,7 @@ def fetch_channel_snippets(api_key: str, channel_ids: list[str]) -> dict[str, di
     resp = requests.get(
         API_URL,
         params={
-            "part": "snippet",
+            "part": "snippet,statistics",
             "id": ",".join(channel_ids),
             "maxResults": BATCH_SIZE,
             "key": api_key,
@@ -82,10 +98,17 @@ def enrich_channels(
                         set title = coalesce(%s, title),
                             handle = coalesce(%s, handle),
                             thumbnail_url = coalesce(%s, thumbnail_url),
+                            subscriber_count = %s,
                             enriched_at = now()
                         where channel_id = %s
                         """,
-                        (info["title"], info["handle"], info["thumbnail"], channel_id),
+                        (
+                            info["title"],
+                            info["handle"],
+                            info["thumbnail"],
+                            info["subscribers"],
+                            channel_id,
+                        ),
                     )
                     updated += 1
                 else:

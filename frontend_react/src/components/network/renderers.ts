@@ -24,16 +24,16 @@ import {
 import {
   BG_COLOR,
   BG_CENTER,
-  DISCOVERED_COLOR,
-  DISCOVERED_GLOW,
   EDGE_ALPHA,
   EDGE_COLOR,
   EDGE_DIM_ALPHA,
   EDGE_HIGHLIGHT_ALPHA,
+  FAR_COLOR,
+  FAR_GLOW,
   FOCUSED_COLOR,
   FOCUSED_GLOW,
-  IN_VTMAP_COLOR,
-  IN_VTMAP_GLOW,
+  HOP2_COLOR,
+  HOP2_GLOW,
   LABEL_COLOR,
   LABEL_DIM,
   NEIGHBOR_COLOR,
@@ -54,8 +54,10 @@ export interface RenderState {
   images: Map<string, HTMLImageElement>;
   hoveredId: string | null;
   focusedId: string | null;
-  /** 聚焦節點的鄰居 id(含聚焦節點本身時視為高亮) */
+  /** 聚焦節點的鄰居 id(邊的亮暗判斷用) */
   highlightIds: Set<string> | null;
+  /** 與參考點(選取優先,其次圓心)的跳數:0/1/2;不在表內 = 更遠 */
+  hopDistances: Map<string, number> | null;
   starField: { x: number; y: number; r: number; alpha: number }[];
   /** 要求載入頭像(延遲載入);未提供時不載圖 */
   requestImage?: (url: string) => void;
@@ -93,7 +95,8 @@ const SPRITE_SCALE = 2;
 /** sprite 內容外擴(光暈用) */
 const SPRITE_PAD = 16;
 const SPRITE_HALF = HEX_RADIUS + SPRITE_PAD;
-const MAX_SPRITE_CACHE = 4000;
+// 每個節點最多四種距離色變體,快取上限要涵蓋(節點數 × 變體數)
+const MAX_SPRITE_CACHE = 8000;
 
 const nodeSpriteCache = new Map<string, HTMLCanvasElement>();
 const haloSpriteCache = new Map<number, HTMLCanvasElement | null>();
@@ -288,12 +291,12 @@ function isEgoOuter(state: RenderState, id: string): boolean {
 
 function nodeVisual(node: LayoutNode, state: RenderState) {
   const id = node.node.channel_id;
-  if (state.focusedId === id) return { color: FOCUSED_COLOR, glow: FOCUSED_GLOW, dim: false };
-  if (state.highlightIds?.has(id))
-    return { color: NEIGHBOR_COLOR, glow: NEIGHBOR_GLOW, dim: false };
-  const dim = state.highlightIds !== null || isEgoOuter(state, id);
-  if (node.node.in_vtmap) return { color: IN_VTMAP_COLOR, glow: IN_VTMAP_GLOW, dim };
-  return { color: DISCOVERED_COLOR, glow: DISCOVERED_GLOW, dim };
+  const dim = isEgoOuter(state, id);
+  const distance = state.hopDistances?.get(id);
+  if (distance === 0) return { color: FOCUSED_COLOR, glow: FOCUSED_GLOW, dim: false };
+  if (distance === 1) return { color: NEIGHBOR_COLOR, glow: NEIGHBOR_GLOW, dim };
+  if (distance === 2) return { color: HOP2_COLOR, glow: HOP2_GLOW, dim };
+  return { color: FAR_COLOR, glow: FAR_GLOW, dim };
 }
 
 // ── 開發模式的幀時間量測 ──

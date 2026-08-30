@@ -2,18 +2,13 @@
  * 畫布角落的顏色圖例:節點外框顏色的意義。
  */
 
-import {
-  DISCOVERED_COLOR,
-  FOCUSED_COLOR,
-  IN_VTMAP_COLOR,
-  NEIGHBOR_COLOR,
-} from "./colors";
+import { FAR_COLOR, FOCUSED_COLOR, HOP2_COLOR, NEIGHBOR_COLOR } from "./colors";
 
 const ITEMS: { color: string; label: string }[] = [
-  { color: IN_VTMAP_COLOR, label: "VTMap 收錄頻道" },
-  { color: DISCOVERED_COLOR, label: "尚未收錄" },
   { color: FOCUSED_COLOR, label: "目前選取" },
-  { color: NEIGHBOR_COLOR, label: "選取頻道的關係人" },
+  { color: NEIGHBOR_COLOR, label: "直接關係" },
+  { color: HOP2_COLOR, label: "隔兩層關係" },
+  { color: FAR_COLOR, label: "更遠或未選取" },
 ];
 
 function HexSwatch({ color }: { color: string }) {

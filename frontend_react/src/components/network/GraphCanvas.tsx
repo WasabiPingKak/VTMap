@@ -63,6 +63,8 @@ export interface GraphCanvasHandle {
     padding?: number,
     rightInset?: number,
   ) => void;
+  /** 確保縮放下限容得下指定範圍(不移動相機);layout 更新時呼叫 */
+  ensureBoundsZoomable: (minX: number, minY: number, maxX: number, maxY: number) => void;
 }
 
 const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(function GraphCanvas(
@@ -288,6 +290,20 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(function Gra
             >[0],
             zoomIdentity.translate(tx, ty).scale(targetScale),
           );
+      },
+
+      ensureBoundsZoomable(minX, minY, maxX, maxY) {
+        if (!zoomRef.current) return;
+        const dpr = window.devicePixelRatio || 1;
+        const w = sizeRef.current.width / dpr;
+        const h = sizeRef.current.height / dpr;
+        if (!w || !h) return;
+
+        const targetScale = Math.min(w / (maxX - minX + 160), h / (maxY - minY + 160), 1.5);
+        if (targetScale < dynamicMinZoomRef.current) {
+          dynamicMinZoomRef.current = targetScale * 0.5;
+          zoomRef.current.scaleExtent([dynamicMinZoomRef.current, maxZoom]);
+        }
       },
     }),
     [requestRender, maxZoom],
