@@ -143,6 +143,66 @@ describe("computeLayout ego 模式", () => {
     expect(dist("UC_C")).toBeLessThan(dist("UC_D"));
   });
 
+  it("第一層依關係強度分層:證據多的離圓心比較近", () => {
+    const nodes = [
+      { channel_id: "UC_hub", title: "圓心", handle: null, thumbnail: null, in_vtmap: true },
+      ...Array.from({ length: 24 }, (_, i) => ({
+        channel_id: `UC_n${i}`,
+        title: `關係人${i}`,
+        handle: null,
+        thumbnail: null,
+        in_vtmap: true,
+      })),
+    ];
+    // 證據數:i 越小越強
+    const edges = nodes.slice(1).map((n, i) => ({
+      a: "UC_hub",
+      b: n.channel_id,
+      evidence_count: 30 - i,
+      last_seen_video_at: null,
+      evidence: [],
+    }));
+
+    const layout = computeLayout({ nodes, edges }, undefined, { centerId: "UC_hub" });
+    const dist = (id: string) => {
+      const n = layout.byId.get(id)!;
+      return Math.hypot(n.x, n.y);
+    };
+
+    // 最強的一批比最弱的一批更靠近圓心
+    expect(dist("UC_n0")).toBeLessThan(dist("UC_n23"));
+    // 內圈維持在「頭像與名字可讀」的距離內
+    expect(dist("UC_n0")).toBeLessThan(400);
+  });
+
+  it("關係人多到單圈裝不下時分成多個子環", () => {
+    const nodes = [
+      { channel_id: "UC_hub", title: "圓心", handle: null, thumbnail: null, in_vtmap: true },
+      ...Array.from({ length: 40 }, (_, i) => ({
+        channel_id: `UC_m${i}`,
+        title: `很長的頻道名稱測試用${i}`,
+        handle: null,
+        thumbnail: null,
+        in_vtmap: true,
+      })),
+    ];
+    const edges = nodes.slice(1).map((n) => ({
+      a: "UC_hub",
+      b: n.channel_id,
+      evidence_count: 2,
+      last_seen_video_at: null,
+      evidence: [],
+    }));
+
+    const layout = computeLayout({ nodes, edges }, undefined, { centerId: "UC_hub" });
+    const radii = nodes
+      .slice(1)
+      .map((n) => layout.byId.get(n.channel_id)!)
+      .map((n) => Math.round(Math.hypot(n.x, n.y) / 50));
+    // 出現至少兩種不同的半徑量級 = 有分成多個子環
+    expect(new Set(radii).size).toBeGreaterThan(1);
+  });
+
   it("圓心不存在時退回一般全圖模式", () => {
     const layout = computeLayout(egoData, undefined, { centerId: "UC_ghost" });
     expect(layout.egoCenterId).toBeNull();
