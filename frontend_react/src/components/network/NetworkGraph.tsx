@@ -171,7 +171,9 @@ const NetworkGraph = forwardRef<NetworkGraphHandle, NetworkGraphProps>(function 
     );
   }, [layout]);
 
-  // ego 圓心切換:相機 fit 到兩環範圍(外圍淡化節點不納入取景)
+  // ego 圓心切換:相機 fit 到「圓心 + 直接關係人」。
+  // 位置是力導向的有機佈局,間接關係散佈範圍常常接近整張圖,
+  // 納入取景會把視野拉到最遠、什麼都看不清,所以只框第一層。
   const prevEgoRef = useRef<string | null>(null);
   useEffect(() => {
     if (prevEgoRef.current === egoCenterId) return;
@@ -183,7 +185,7 @@ const NetworkGraph = forwardRef<NetworkGraphHandle, NetworkGraphProps>(function 
     let maxX = -Infinity;
     let maxY = -Infinity;
     for (const n of layout.nodes) {
-      if (layout.rings && (layout.rings.get(n.node.channel_id) ?? 0) >= 3) continue;
+      if (layout.rings && (layout.rings.get(n.node.channel_id) ?? 0) >= 2) continue;
       minX = Math.min(minX, n.x - n.labelHalfWidth);
       maxX = Math.max(maxX, n.x + n.labelHalfWidth);
       minY = Math.min(minY, n.y - 22);
