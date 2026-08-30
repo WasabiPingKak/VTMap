@@ -28,6 +28,13 @@ MIN_SUBSCRIBERS = int(os.getenv("CRAWLER_MIN_SUBSCRIBERS", "100"))
 # 每個任務之間的等待秒數(加上隨機抖動),避免請求過密
 TASK_SLEEP_SECONDS = float(os.getenv("CRAWLER_TASK_SLEEP", "6"))
 
+# 長時間執行時每處理幾個任務做一次保養(補完訂閱數、重算優先權、回收孤兒任務)
+MAINTENANCE_EVERY_TASKS = int(os.getenv("CRAWLER_MAINTENANCE_EVERY", "400"))
+
+# running 超過這麼久視為孤兒任務(程序中斷留下的),放回 pending 重跑
+# 聊天室下載本身的 timeout 是 30 分鐘,門檻要比它寬
+STALE_RUNNING_MINUTES = int(os.getenv("CRAWLER_STALE_RUNNING_MINUTES", "60"))
+
 # 已知聊天機器人帳號名稱(比對時轉小寫)
 KNOWN_BOT_NAMES = {
     "nightbot",

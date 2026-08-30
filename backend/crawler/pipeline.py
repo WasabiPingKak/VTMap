@@ -15,10 +15,14 @@ import psycopg
 import requests
 
 from crawler import chat_parser, repo, ytdlp
+from crawler.db import get_conn
 from crawler.settings import (
     BACKFILL_VIDEOS_PER_CHANNEL,
     KNOWN_BOT_NAMES,
+    MAINTENANCE_EVERY_TASKS,
     MAX_CRAWL_DEPTH,
+    MIN_SUBSCRIBERS,
+    STALE_RUNNING_MINUTES,
     TASK_SLEEP_SECONDS,
 )
 
@@ -213,3 +217,82 @@ def run_queue(
         if sleep_seconds > 0:
             time.sleep(sleep_seconds + random.uniform(0, sleep_seconds * 0.5))
     return processed
+
+
+def run_maintenance(youtube_api_key: str | None = None) -> None:
+    """兩批任務之間的保養:回收孤兒任務、補完訂閱數、補排未爬頻道並重算優先權。
+
+    新發現的頻道是以 priority 0 排入的,不重算的話連結度優先就會退化成先進先出;
+    而訂閱數要 enrich 過才有,所以順序是先 enrich 再重算。單項失敗不影響其他項。
+    """
+    if youtube_api_key:
+        try:
+            from crawler.enrich import enrich_channels
+
+            with get_conn() as conn:
+                updated, missing = enrich_channels(conn, youtube_api_key)
+            logger.info("保養:補完 %s 個頻道(%s 個查無資料)", updated, missing)
+        except Exception as e:
+            logger.warning("保養:enrich 失敗(略過):%s", e)
+
+    try:
+        with get_conn() as conn:
+            stale = repo.reclaim_stale_running(conn, STALE_RUNNING_MINUTES)
+            added = repo.enqueue_missing_list_videos(conn, MIN_SUBSCRIBERS)
+            scored = repo.reprioritize_pending_list_videos(conn)
+            conn.commit()
+        logger.info("保養:回收孤兒 %s、新排入 %s、重算優先權 %s", stale, added, scored)
+    except Exception as e:
+        logger.warning("保養:佇列維護失敗(略過):%s", e)
+
+
+def run_unattended(
+    max_hours: float,
+    youtube_api_key: str | None = None,
+    maintain_every: int = MAINTENANCE_EVERY_TASKS,
+    sleep_seconds: float = TASK_SLEEP_SECONDS,
+) -> int:
+    """長時間無人值守執行:分段跑、段間保養、連線失敗自動重連,回傳處理總數。
+
+    每段用一條新連線(避免長壽連線被 pooler 中斷),整段失敗時等待後重試,
+    連續失敗過多才放棄。佇列暫時空掉不代表結束,等待後再看一次。
+    """
+    deadline = time.monotonic() + max_hours * 3600
+    total = 0
+    consecutive_failures = 0
+    idle_rounds = 0
+
+    while time.monotonic() < deadline:
+        try:
+            with get_conn() as conn:
+                processed = run_queue(
+                    conn, max_tasks=maintain_every, sleep_seconds=sleep_seconds
+                )
+            consecutive_failures = 0
+        except Exception as e:
+            consecutive_failures += 1
+            logger.warning("本段執行失敗(第 %s 次):%s", consecutive_failures, e)
+            if consecutive_failures >= 5:
+                logger.error("連續失敗 5 次,停止")
+                break
+            time.sleep(60)
+            continue
+
+        total += processed
+        logger.info("已處理累計 %s 個任務,剩餘時間 %.1f 小時",
+                    total, (deadline - time.monotonic()) / 3600)
+
+        run_maintenance(youtube_api_key)
+
+        if processed == 0:
+            idle_rounds += 1
+            if idle_rounds >= 3:
+                logger.info("佇列連續 3 次為空,爬取已收斂,結束")
+                break
+            logger.info("佇列暫時為空,等待後再試")
+            time.sleep(60)
+        else:
+            idle_rounds = 0
+
+    logger.info("結束,本次共處理 %s 個任務", total)
+    return total

@@ -165,6 +165,25 @@ def reprioritize_pending_list_videos(conn: psycopg.Connection) -> int:
         return cur.rowcount
 
 
+def reclaim_stale_running(conn: psycopg.Connection, older_than_minutes: int) -> int:
+    """把卡在 running 太久的任務放回 pending,回傳筆數。
+
+    程序中途被砍或連線斷掉時,已認領的任務會永遠停在 running(claim 只挑 pending),
+    長時間執行必須定期回收,否則這些任務就此消失。
+    """
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            update crawl_queue
+            set status = 'pending'
+            where status = 'running'
+              and updated_at < now() - make_interval(mins => %s)
+            """,
+            (older_than_minutes,),
+        )
+        return cur.rowcount
+
+
 def claim_next_task(conn: psycopg.Connection, kinds: list[str]) -> Task | None:
     """取出一筆待處理任務並標記為 running(FOR UPDATE SKIP LOCKED 防重複認領)。"""
     with conn.cursor() as cur:
