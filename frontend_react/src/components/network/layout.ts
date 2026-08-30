@@ -9,8 +9,6 @@
  * 其餘=3 外圍淡化),用 forceRadial 把各環約束在對應半徑。
  */
 
-import { forceCollide, forceRadial, forceSimulation } from "d3-force";
-import type { SimulationNodeDatum } from "d3-force";
 import forceAtlas2 from "graphology-layout-forceatlas2";
 import type {
   GraphLayout,
@@ -27,10 +25,6 @@ import {
   type MeasureFn,
 } from "./labelMetrics";
 import { resolveRectCollisions, type FootprintNode } from "./rectSeparation";
-
-interface SimNode extends SimulationNodeDatum {
-  id: string;
-}
 
 export interface EgoOptions {
   centerId: string;
@@ -95,23 +89,68 @@ interface RingPlacement {
 }
 
 /**
+ * 依社群分配整圓的扇區,回傳每個節點的目標角度。
+ * 同社群的節點固定落在同一個方向的楔形內(扇區寬度 ∝ 成員數),
+ * 讓 ego 視圖保留「同群聚同方向」的群組結構。
+ */
+function computeSectorAngles(
+  nodeIds: string[],
+  communities: Map<string, number> | null,
+): Map<string, number> {
+  const targetAngles = new Map<string, number>();
+  const communityOf = (id: string) => communities?.get(id) ?? -1;
+
+  const counts = new Map<number, number>();
+  for (const id of nodeIds) {
+    const community = communityOf(id);
+    counts.set(community, (counts.get(community) ?? 0) + 1);
+  }
+  // 大社群優先分配(順序穩定)
+  const ordered = [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0] - b[0]);
+  const total = nodeIds.length || 1;
+
+  const sectorCenter = new Map<number, number>();
+  const sectorWidth = new Map<number, number>();
+  let cursor = 0;
+  for (const [community, count] of ordered) {
+    const width = (count / total) * 2 * Math.PI;
+    sectorCenter.set(community, cursor + width / 2);
+    sectorWidth.set(community, width);
+    cursor += width;
+  }
+
+  for (const id of nodeIds) {
+    const community = communityOf(id);
+    const center = sectorCenter.get(community) ?? 0;
+    const width = sectorWidth.get(community) ?? 2 * Math.PI;
+    // 扇區內用穩定雜湊抖動,避免同群全部疊在同一個角度
+    const jitter = (hashAngle(id) / (2 * Math.PI) - 0.5) * width * 0.85;
+    targetAngles.set(id, center + jitter);
+  }
+  return targetAngles;
+}
+
+/**
  * 把成員排進一圈圈同心子環:依傳入順序(強度由大到小)填,
  * 一圈塞滿(圓周容不下下一個)就往外開新的一圈。
+ * 同圈成員依「目標角度」(社群扇區)排,盡量貼近目標方向,
+ * 圓周擁擠時退回按佔用寬度比例分配。
  * 回傳每個成員的半徑與角度,以及最外圈的半徑。
  */
 function packIntoSubRings(
   members: string[],
   halfWidthById: Map<string, number>,
   startRadius: number,
+  targetAngles: Map<string, number>,
 ): { placements: Map<string, RingPlacement>; outerRadius: number } {
   const placements = new Map<string, RingPlacement>();
   if (!members.length) return { placements, outerRadius: startRadius };
 
   const occupied = (id: string) => (halfWidthById.get(id) ?? HEX_RADIUS) * 2 + ARC_PADDING;
+  const target = (id: string) => targetAngles.get(id) ?? hashAngle(id);
 
   let radius = startRadius;
   let index = 0;
-  let subRingIndex = 0;
   while (index < members.length) {
     const capacity = 2 * Math.PI * radius;
     const batch: string[] = [];
@@ -125,17 +164,41 @@ function packIntoSubRings(
       index += 1;
     }
 
-    // 同圈成員依實際佔用寬度按比例分配角度(寬的多佔一點,避免擠在一起)
-    const total = batch.reduce((sum, id) => sum + occupied(id), 0) || 1;
-    // 每圈起始角錯開,避免子環之間連成一直線
-    let angle = subRingIndex * 0.9;
-    for (const id of batch) {
-      const share = (occupied(id) / total) * 2 * Math.PI;
-      placements.set(id, { radius, angle: angle + share / 2 });
-      angle += share;
+    // 依目標角度排序後放置:先放在目標角,前向掃描推開重疊
+    batch.sort((a, b) => target(a) - target(b));
+    const angularWidth = (id: string) => occupied(id) / radius;
+
+    if (used / capacity > 0.82) {
+      // 圓周快滿:按佔用比例分配,起點取第一個成員的目標角(方向大致保留)
+      let angle = target(batch[0]);
+      for (const id of batch) {
+        const share = (occupied(id) / used) * 2 * Math.PI;
+        placements.set(id, { radius, angle: angle + share / 2 });
+        angle += share;
+      }
+    } else {
+      const angles: number[] = [];
+      for (let i = 0; i < batch.length; i++) {
+        const desired = target(batch[i]);
+        if (i === 0) {
+          angles.push(desired);
+          continue;
+        }
+        const minAngle =
+          angles[i - 1] + angularWidth(batch[i - 1]) / 2 + angularWidth(batch[i]) / 2;
+        angles.push(Math.max(desired, minAngle));
+      }
+      // 頭尾繞圈重疊時整體回轉一點
+      const overshoot =
+        angles[angles.length - 1] +
+        angularWidth(batch[batch.length - 1]) / 2 -
+        (angles[0] - angularWidth(batch[0]) / 2 + 2 * Math.PI);
+      const shift = overshoot > 0 ? overshoot / 2 : 0;
+      batch.forEach((id, i) => {
+        placements.set(id, { radius, angle: angles[i] - shift });
+      });
     }
 
-    subRingIndex += 1;
     if (index < members.length) radius += SUB_RING_GAP;
   }
 
@@ -154,20 +217,20 @@ function hashAngle(id: string): number {
 /**
  * ego 模式:以圓心為原點的同心環佈局。
  *
- * 第一層(直接關係)依關係強度(證據數)由強到弱排序,填進一圈圈子環:
- * 最強的貼近圓心,一圈塞滿才往外開下一圈。距離因此代表關係深淺,
- * 且內圈永遠在「頭像與名字看得清楚」的縮放範圍內。
- * 第二層與外圍接在最外側子環之後。
+ * 半徑 = 關係強度:第一層依證據數由強到弱填子環,最強貼近圓心。
+ * 角度 = 社群方向:同社群固定佔同一個扇區,內外圈對齊成放射狀楔形,
+ * 保留「同群聚同方向」的群組結構。
+ * 位置由打包直接決定(不跑力學模擬),殘餘重疊交給矩形分離,速度快且確定。
  */
 function computeEgoPositions(
   data: NetworkGraphData,
   centerId: string,
   rings: Map<string, number>,
   halfWidthById: Map<string, number>,
-  metrics: { halfWidth: number }[],
+  communities: Map<string, number> | null,
 ): { x: number; y: number }[] {
-  const adjacency = buildAdjacency(data);
   const nodeIds = data.nodes.map((n) => n.channel_id);
+  const targetAngles = computeSectorAngles(nodeIds, communities);
 
   // 圓心與各直接關係人的證據數(關係強度)
   const strengthToCenter = new Map<string, number>();
@@ -184,74 +247,31 @@ function computeEgoPositions(
     const diff = (strengthToCenter.get(b) ?? 0) - (strengthToCenter.get(a) ?? 0);
     return diff !== 0 ? diff : a.localeCompare(b);
   });
-  const first = packIntoSubRings(firstLayer, halfWidthById, FIRST_RING_RADIUS);
+  const first = packIntoSubRings(firstLayer, halfWidthById, FIRST_RING_RADIUS, targetAngles);
 
   // 第二層:排在第一層最外圈之外,同樣可分成多個子環
   const secondStart = first.outerRadius + SUB_RING_GAP + 40;
-  const second = packIntoSubRings(byRing[2], halfWidthById, secondStart);
+  const second = packIntoSubRings(byRing[2], halfWidthById, secondStart, targetAngles);
 
   const placements = new Map<string, RingPlacement>([...first.placements, ...second.placements]);
 
-  // 第二層節點靠向其第一層鄰居的角度,減少跨環交叉(半徑不動)
-  for (const id of byRing[2]) {
-    const placement = placements.get(id);
-    if (!placement) continue;
-    const parents = [...(adjacency.get(id) ?? [])].filter((p) => rings.get(p) === 1);
-    const parentAngles = parents
-      .map((p) => placements.get(p)?.angle)
-      .filter((a): a is number => a !== undefined);
-    if (parentAngles.length) {
-      // 角度平均要走向量,避免 0/2π 邊界問題
-      const x = parentAngles.reduce((s, a) => s + Math.cos(a), 0);
-      const y = parentAngles.reduce((s, a) => s + Math.sin(a), 0);
-      if (x || y) placement.angle = Math.atan2(y, x);
-    }
-  }
-
-  // 外圍(無關)節點:同樣以子環打包成有序的淡色殼。
-  // 圓周容量必須真的裝得下(不能全部疊在同一圈,否則矩形分離會把
-  // 它們炸開成厚球、連帶擠壞內部結構),並與 ego 結構保留明顯空隙。
+  // 外圍(無關)節點:子環打包成有序的淡色殼,與 ego 結構保留明顯空隙。
+  // 圓周容量必須真的裝得下,不能全部疊在同一圈。
   const outerStart = second.outerRadius + SUB_RING_GAP + 220;
-  const outerSorted = [...byRing[3]].sort((a, b) => hashAngle(a) - hashAngle(b));
-  const outer = packIntoSubRings(outerSorted, halfWidthById, outerStart);
+  const outer = packIntoSubRings(byRing[3], halfWidthById, outerStart, targetAngles);
   for (const [id, placement] of outer.placements) {
     placements.set(id, placement);
   }
-  const fallbackRadius = outer.outerRadius;
 
-  const simNodes: SimNode[] = data.nodes.map((n) => ({ id: n.channel_id }));
-  for (const sn of simNodes) {
-    if (rings.get(sn.id) === 0) {
-      sn.fx = 0;
-      sn.fy = 0;
-      continue;
-    }
-    const placement = placements.get(sn.id);
-    if (!placement) continue;
-    sn.x = Math.cos(placement.angle) * placement.radius;
-    sn.y = Math.sin(placement.angle) * placement.radius;
-  }
-
-  // 只跑碰撞與環約束(不跑 link 力,否則子環的強度分層會被拉散)
-  const sim = forceSimulation(simNodes)
-    .force(
-      "collide",
-      forceCollide((_d, i) => Math.max(metrics[i].halfWidth, HEX_RADIUS) + 12),
-    )
-    .force(
-      "radial",
-      forceRadial(
-        (d) => placements.get((d as SimNode).id)?.radius ?? fallbackRadius,
-        0,
-        0,
-      ).strength((d) => (rings.get((d as SimNode).id)! >= EGO_OUTER_RING ? 0.6 : 0.95)),
-    )
-    .stop();
-
-  const ticks = Math.ceil(Math.log(sim.alphaMin()) / Math.log(1 - sim.alphaDecay()));
-  sim.tick(ticks);
-
-  return simNodes.map((sn) => ({ x: sn.x ?? 0, y: sn.y ?? 0 }));
+  return data.nodes.map((n) => {
+    if (rings.get(n.channel_id) === 0) return { x: 0, y: 0 };
+    const placement = placements.get(n.channel_id);
+    if (!placement) return { x: 0, y: 0 };
+    return {
+      x: Math.cos(placement.angle) * placement.radius,
+      y: Math.sin(placement.angle) * placement.radius,
+    };
+  });
 }
 
 /** 全圖模式:ForceAtlas2,社群自然聚攏 */
@@ -330,7 +350,7 @@ export function computeLayout(
   const communities = data.nodes.length ? detectCommunities(data) : null;
 
   const positions = egoActive
-    ? computeEgoPositions(data, ego!.centerId, rings!, halfWidthById, metrics)
+    ? computeEgoPositions(data, ego!.centerId, rings!, halfWidthById, communities)
     : computeGlobalPositions(data);
 
   // 矩形分離:保證「節點 + 下方標籤」零重疊
