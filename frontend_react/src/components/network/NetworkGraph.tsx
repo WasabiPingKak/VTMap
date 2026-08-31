@@ -67,6 +67,7 @@ const NetworkGraph = forwardRef<NetworkGraphHandle, NetworkGraphProps>(function 
         highlightIds: focused ? (layout.neighbors.get(focused) ?? new Set()) : null,
         starField,
         requestImage,
+        requestRepaint: () => canvasRef.current?.requestRender(),
       };
       drawNetwork(ctx, transform, size.width, size.height, state);
     },

@@ -59,6 +59,8 @@ export interface RenderState {
   starField: { x: number; y: number; r: number; alpha: number }[];
   /** 要求載入頭像(延遲載入);未提供時不載圖 */
   requestImage?: (url: string) => void;
+  /** sprite 生成限額用盡時要求下一幀重繪(漸進補齊) */
+  requestRepaint?: () => void;
 }
 
 export function createStarField(count = 260, spread = 2600) {
@@ -92,10 +94,31 @@ function hexPath(ctx: CanvasRenderingContext2D, x: number, y: number, r: number)
 const SPRITE_SCALE = 2;
 /** sprite 內容外擴(光暈用) */
 const SPRITE_PAD = 16;
+
+/** sprite 解析度桶(高→低;縮小檢視時用低解析來源,避免瀏覽器 bilinear 重採樣) */
+const SPRITE_BUCKETS = [1, 0.5, 0.25] as const;
+
+/**
+ * 依有效縮放(css scale × dpr)選解析度桶:
+ * 選最大的「仍小於有效縮放」的桶,降採樣比落在 1~2 倍之間。
+ * 千節點全景不卡的關鍵 = 讓瀏覽器每幀不用把 152px sprite 縮到 20px。
+ */
+function spriteBucketFor(effectiveScale: number): number {
+  let bucket = 1;
+  while (bucket > 0.25 && bucket >= effectiveScale) bucket /= 2;
+  return bucket;
+}
+
+/** 每幀允許新建的 sprite 數,超額的下一幀補(消除大量新節點同時進場的尖峰) */
+const SPRITE_BUDGET_PER_FRAME = 64;
+let spriteBudget = SPRITE_BUDGET_PER_FRAME;
+let spriteBudgetExhausted = false;
 const SPRITE_HALF = HEX_RADIUS + SPRITE_PAD;
-const MAX_SPRITE_CACHE = 4000;
+// 每節點的 sprite 變體:有/無頭像 × 3 解析度桶,乘上節點數 → 5000 有餘裕
+const MAX_SPRITE_CACHE = 6000;
 
 const nodeSpriteCache = new Map<string, HTMLCanvasElement>();
+const glowSpriteCache = new Map<string, HTMLCanvasElement | null>();
 const haloSpriteCache = new Map<number, HTMLCanvasElement | null>();
 
 function createSpriteCanvas(size: number): CanvasRenderingContext2D | null {
@@ -106,41 +129,77 @@ function createSpriteCanvas(size: number): CanvasRenderingContext2D | null {
   return canvas.getContext("2d");
 }
 
-/** 節點 sprite:光暈 + 六角底 + 頭像(或首字)+ 邊框,一次畫好之後重複 blit */
+/** 光暈 sprite:每種狀態光暈色 × 解析度桶一張,全部節點共用 */
+function getGlowSprite(glow: string, bucket: number): HTMLCanvasElement | null {
+  const key = `${glow}|${bucket}`;
+  const cached = glowSpriteCache.get(key);
+  if (cached !== undefined) return cached;
+
+  const size = SPRITE_HALF * 2 * SPRITE_SCALE * bucket;
+  const spriteCtx = createSpriteCanvas(size);
+  if (!spriteCtx) {
+    glowSpriteCache.set(key, null);
+    return null;
+  }
+  spriteCtx.scale(SPRITE_SCALE * bucket, SPRITE_SCALE * bucket);
+  spriteCtx.translate(SPRITE_HALF, SPRITE_HALF);
+  spriteCtx.shadowColor = glow;
+  // shadowBlur 不受 ctx 縮放影響,依桶換算維持等效光暈大小
+  spriteCtx.shadowBlur = 12 * bucket;
+  hexPath(spriteCtx, 0, 0, HEX_RADIUS);
+  spriteCtx.fillStyle = BG_CENTER;
+  spriteCtx.fill();
+  glowSpriteCache.set(key, spriteCtx.canvas);
+  return spriteCtx.canvas;
+}
+
+/**
+ * 節點 sprite:六角底 + 頭像(或首字)。與狀態色/光暈無關,
+ * 邊框改由主迴圈每幀畫(狀態色變不需重生 sprite)。
+ */
 function getNodeSprite(
   node: LayoutNode,
-  color: string,
-  glow: string,
   img: HTMLImageElement | undefined,
+  bucket: number,
 ): HTMLCanvasElement | null {
-  const key = `${node.node.channel_id}|${color}|${img ? "img" : "txt"}`;
+  const variant = img ? "img" : "txt";
+  const key = `${node.node.channel_id}|${variant}|${bucket}`;
   const cached = nodeSpriteCache.get(key);
   if (cached) return cached;
 
-  const size = SPRITE_HALF * 2 * SPRITE_SCALE;
+  if (spriteBudget <= 0) {
+    spriteBudgetExhausted = true;
+    // 其他解析度桶的現成 sprite 先頂著,下一幀再補正確的桶
+    for (const b of SPRITE_BUCKETS) {
+      if (b === bucket) continue;
+      const alt = nodeSpriteCache.get(`${node.node.channel_id}|${variant}|${b}`);
+      if (alt) return alt;
+    }
+    return null;
+  }
+
+  const size = SPRITE_HALF * 2 * SPRITE_SCALE * bucket;
   const spriteCtx = createSpriteCanvas(size);
   if (!spriteCtx) return null;
+  spriteBudget -= 1;
 
-  spriteCtx.scale(SPRITE_SCALE, SPRITE_SCALE);
+  spriteCtx.scale(SPRITE_SCALE * bucket, SPRITE_SCALE * bucket);
   spriteCtx.translate(SPRITE_HALF, SPRITE_HALF);
   const r = HEX_RADIUS;
 
-  // 光暈(sprite 生成時付一次 shadowBlur 成本)
-  spriteCtx.save();
-  spriteCtx.shadowColor = glow;
-  spriteCtx.shadowBlur = 12;
-  hexPath(spriteCtx, 0, 0, r);
-  spriteCtx.fillStyle = BG_CENTER;
-  spriteCtx.fill();
-  spriteCtx.restore();
-
   if (img) {
+    hexPath(spriteCtx, 0, 0, r - 2);
+    spriteCtx.fillStyle = BG_CENTER;
+    spriteCtx.fill();
     spriteCtx.save();
     hexPath(spriteCtx, 0, 0, r - 2);
     spriteCtx.clip();
     spriteCtx.drawImage(img, -r, -r, r * 2, r * 2);
     spriteCtx.restore();
   } else {
+    hexPath(spriteCtx, 0, 0, r - 2);
+    spriteCtx.fillStyle = BG_CENTER;
+    spriteCtx.fill();
     hexPath(spriteCtx, 0, 0, r - 2);
     spriteCtx.fillStyle = "rgba(255,255,255,0.06)";
     spriteCtx.fill();
@@ -150,11 +209,6 @@ function getNodeSprite(
     spriteCtx.textBaseline = "middle";
     spriteCtx.fillText(channelInitial(node.node), 0, 1);
   }
-
-  hexPath(spriteCtx, 0, 0, r);
-  spriteCtx.strokeStyle = color;
-  spriteCtx.lineWidth = 2;
-  spriteCtx.stroke();
 
   if (nodeSpriteCache.size >= MAX_SPRITE_CACHE) nodeSpriteCache.clear();
   const canvas = spriteCtx.canvas;
@@ -167,16 +221,28 @@ const labelSpriteCache = new Map<string, HTMLCanvasElement | null>();
 const LABEL_SPRITE_SCALE = 2;
 const LABEL_SPRITE_PAD = 4;
 
-function getLabelSprite(node: LayoutNode): HTMLCanvasElement | null {
-  const key = node.node.channel_id;
+function getLabelSprite(node: LayoutNode, bucket: number): HTMLCanvasElement | null {
+  const key = `${node.node.channel_id}|${bucket}`;
   const cached = labelSpriteCache.get(key);
   if (cached !== undefined) return cached;
 
+  if (spriteBudget <= 0) {
+    spriteBudgetExhausted = true;
+    for (const b of SPRITE_BUCKETS) {
+      if (b === bucket) continue;
+      const alt = labelSpriteCache.get(`${node.node.channel_id}|${b}`);
+      if (alt) return alt;
+    }
+    return null;
+  }
+  spriteBudget -= 1;
+
+  const renderScale = LABEL_SPRITE_SCALE * bucket;
   const worstFont = FONT_BASE / FONT_MIN_SCALE;
   const lineHeight = worstFont * LINE_HEIGHT_RATIO;
-  const width = Math.ceil((node.labelHalfWidth * 2 + LABEL_SPRITE_PAD * 2) * LABEL_SPRITE_SCALE);
+  const width = Math.ceil((node.labelHalfWidth * 2 + LABEL_SPRITE_PAD * 2) * renderScale);
   const height = Math.ceil(
-    (node.labelLines.length * lineHeight + LABEL_SPRITE_PAD * 2) * LABEL_SPRITE_SCALE,
+    (node.labelLines.length * lineHeight + LABEL_SPRITE_PAD * 2) * renderScale,
   );
 
   if (typeof document === "undefined") {
@@ -192,7 +258,7 @@ function getLabelSprite(node: LayoutNode): HTMLCanvasElement | null {
     return null;
   }
 
-  spriteCtx.scale(LABEL_SPRITE_SCALE, LABEL_SPRITE_SCALE);
+  spriteCtx.scale(renderScale, renderScale);
   spriteCtx.font = `${worstFont}px sans-serif`;
   spriteCtx.textAlign = "center";
   spriteCtx.textBaseline = "top";
@@ -316,6 +382,8 @@ export function drawNetwork(
   state: RenderState,
 ) {
   const frameStart = import.meta.env.DEV ? performance.now() : 0;
+  spriteBudget = SPRITE_BUDGET_PER_FRAME;
+  spriteBudgetExhausted = false;
   const dpr = window.devicePixelRatio || 1;
   const width = sizeWidth / dpr;
   const height = sizeHeight / dpr;
@@ -329,6 +397,8 @@ export function drawNetwork(
   const { layout } = state;
   const scale = transform.scale;
   const dotsOnly = scale < DOTS_ONLY_SCALE;
+  // 解析度桶依「css 縮放 × dpr」選,螢幕上的實際像素密度才是準
+  const bucket = spriteBucketFor(scale * dpr);
 
   // ── 視野裁剪:世界座標下的可見範圍 ──
   const viewMinX = -transform.x / scale - CULL_MARGIN;
@@ -457,7 +527,19 @@ export function drawNetwork(
       if (!img) state.requestImage?.(node.node.thumbnail);
     }
 
-    const sprite = getNodeSprite(node, color, glow, img);
+    // 光暈(依狀態光暈色共用 sprite,不依節點)
+    const glowSprite = getGlowSprite(glow, bucket);
+    if (glowSprite) {
+      ctx.drawImage(
+        glowSprite,
+        node.x - SPRITE_HALF,
+        node.y - SPRITE_HALF,
+        SPRITE_HALF * 2,
+        SPRITE_HALF * 2,
+      );
+    }
+
+    const sprite = getNodeSprite(node, img, bucket);
     if (sprite) {
       ctx.drawImage(
         sprite,
@@ -467,7 +549,7 @@ export function drawNetwork(
         SPRITE_HALF * 2,
       );
     } else {
-      // 無法建立 sprite(測試環境等):直接繪製
+      // sprite 尚未生成(限額中)或測試環境:直接繪製簡化版
       const r = HEX_RADIUS;
       hexPath(ctx, node.x, node.y, r - 2);
       ctx.fillStyle = BG_CENTER;
@@ -477,27 +559,26 @@ export function drawNetwork(
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
       ctx.fillText(channelInitial(node.node), node.x, node.y + 1);
-      hexPath(ctx, node.x, node.y, r);
-      ctx.strokeStyle = color;
-      ctx.lineWidth = 2;
-      ctx.stroke();
     }
 
-    // hover 強調:外圈加粗邊框(單一節點,成本可忽略)
-    if (hovered) {
-      hexPath(ctx, node.x, node.y, HEX_RADIUS + 2);
-      ctx.strokeStyle = color;
-      ctx.lineWidth = 3;
-      ctx.stroke();
-    }
+    // 狀態色邊框(每幀直接畫,變色不需重生 sprite)
+    hexPath(ctx, node.x, node.y, HEX_RADIUS);
+    ctx.strokeStyle = color;
+    ctx.lineWidth = hovered ? 3 : 2;
+    ctx.stroke();
   });
   ctx.globalAlpha = 1;
 
   // ── 標籤(固定在節點下方置中;layout 已保證互不重疊)──
   if (!dotsOnly) {
-    drawLabels(ctx, scale, state, visible);
+    drawLabels(ctx, scale, state, visible, bucket);
   }
   ctx.restore();
+
+  // sprite 沒生完:下一幀接著補
+  if (spriteBudgetExhausted) {
+    state.requestRepaint?.();
+  }
 
   if (import.meta.env.DEV) {
     recordFrameTime(performance.now() - frameStart);
@@ -509,11 +590,13 @@ function drawLabels(
   scale: number,
   state: RenderState,
   visible: Uint8Array,
+  bucket: number,
 ) {
   // scale >= FONT_MIN_SCALE 時螢幕字級恆定,更小時字跟著世界縮小(空間已按最壞情況保留)
   const fontSize = FONT_BASE / Math.max(scale, FONT_MIN_SCALE);
   const lineHeight = fontSize * LINE_HEIGHT_RATIO;
   const worstFont = FONT_BASE / FONT_MIN_SCALE;
+  const worstLineHeight = worstFont * LINE_HEIGHT_RATIO;
   // sprite 以最壞情況字級渲染,依目前字級等比縮小
   const ratio = fontSize / worstFont;
   let fontSet = false;
@@ -524,11 +607,13 @@ function drawLabels(
     const { dim } = nodeVisual(node, state);
     const startY = node.y + HEX_RADIUS + fontSize * LABEL_GAP_RATIO;
 
-    const sprite = getLabelSprite(node);
+    const sprite = getLabelSprite(node, bucket);
     if (sprite) {
       ctx.globalAlpha = dim && !hovered ? 0.4 : 1;
-      const destW = (sprite.width / LABEL_SPRITE_SCALE) * ratio;
-      const destH = (sprite.height / LABEL_SPRITE_SCALE) * ratio;
+      // 目的尺寸由節點度量推導(sprite 可能是其他解析度桶的替代品,不能除 sprite 尺寸)
+      const destW = (node.labelHalfWidth * 2 + LABEL_SPRITE_PAD * 2) * ratio;
+      const destH =
+        (node.labelLines.length * worstLineHeight + LABEL_SPRITE_PAD * 2) * ratio;
       ctx.drawImage(
         sprite,
         node.x - destW / 2,

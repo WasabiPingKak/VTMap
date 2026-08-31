@@ -248,6 +248,30 @@ function computeGlobalPositions(data: NetworkGraphData): { x: number; y: number 
   return positions;
 }
 
+/**
+ * 全圖模式基底(FA2 位置 + Louvain 社群)依資料物件快取:
+ * 同一份資料進頁、離頁再回,只算一次 FA2(~700ms),不再凍結畫面。
+ * 自訂 measure(測試)不走快取,避免測試互相污染。
+ */
+interface GlobalBasis {
+  positions: { x: number; y: number }[];
+  communities: Map<string, number> | null;
+}
+const globalBasisCache = new WeakMap<NetworkGraphData, GlobalBasis>();
+
+function getGlobalBasis(data: NetworkGraphData, useCache: boolean): GlobalBasis {
+  if (useCache) {
+    const cached = globalBasisCache.get(data);
+    if (cached) return cached;
+  }
+  const basis: GlobalBasis = {
+    positions: computeGlobalPositions(data),
+    communities: data.nodes.length ? detectCommunities(data) : null,
+  };
+  if (useCache) globalBasisCache.set(data, basis);
+  return basis;
+}
+
 export function computeLayout(
   data: NetworkGraphData,
   measure?: MeasureFn,
@@ -264,11 +288,12 @@ export function computeLayout(
   const rings = egoActive
     ? assignRings(ego!.centerId, nodeIds, buildAdjacency(data))
     : null;
-  const communities = data.nodes.length ? detectCommunities(data) : null;
+  const basis = getGlobalBasis(data, !measure);
+  const communities = basis.communities;
 
   const positions = egoActive
     ? computeEgoPositions(data, ego!.centerId, rings!, halfWidthById, metrics)
-    : computeGlobalPositions(data);
+    : basis.positions;
 
   // 矩形分離:保證「節點 + 下方標籤」零重疊
   const footprints: FootprintNode[] = positions.map((p, i) => ({
