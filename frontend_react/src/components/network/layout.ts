@@ -20,6 +20,7 @@ import type { SimulationNodeDatum } from "d3-force";
 import forceAtlas2 from "graphology-layout-forceatlas2";
 import type {
   GraphLayout,
+  HitGrid,
   LayoutEdge,
   LayoutNode,
   NetworkGraphData,
@@ -44,6 +45,30 @@ export interface EgoOptions {
 
 /** 外圍(與圓心兩層內無關)的環編號 */
 export const EGO_OUTER_RING = 3;
+
+/** hitGrid 桶邊長:> 2 * (HEX_RADIUS + hit tolerance),查一點只需掃 3×3 桶 */
+const HIT_GRID_CELL = 60;
+/** hitGrid 座標打包偏移:節點座標實務範圍遠小於 ±(32768 * cell) */
+const HIT_GRID_OFFSET = 32768;
+
+/** 把 (cx, cy) 打包成單一整數 key(JS 數字安全整數範圍內) */
+export function packHitCell(cx: number, cy: number): number {
+  return (cx + HIT_GRID_OFFSET) * 65536 + (cy + HIT_GRID_OFFSET);
+}
+
+function buildHitGrid(nodes: LayoutNode[]): HitGrid {
+  const cells = new Map<number, number[]>();
+  for (let i = 0; i < nodes.length; i++) {
+    const n = nodes[i];
+    const cx = Math.floor(n.x / HIT_GRID_CELL);
+    const cy = Math.floor(n.y / HIT_GRID_CELL);
+    const key = packHitCell(cx, cy);
+    const bucket = cells.get(key);
+    if (bucket) bucket.push(i);
+    else cells.set(key, [i]);
+  }
+  return { cellSize: HIT_GRID_CELL, cells };
+}
 
 /** 全圖模式縮放的目標:有連線的節點對之間的中位數距離 */
 const TARGET_LINKED_DISTANCE = 180;
@@ -373,5 +398,6 @@ export function computeLayout(
     egoCenterId: egoActive ? ego!.centerId : null,
     rings,
     communities,
+    hitGrid: buildHitGrid(nodes),
   };
 }

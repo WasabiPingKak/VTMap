@@ -47,6 +47,13 @@ export interface LayoutEdge {
   target: LayoutNode;
 }
 
+/** 空間網格:hitTest 用,把節點依座標分桶,查詢時只掃 3×3 個桶 */
+export interface HitGrid {
+  cellSize: number;
+  /** key = 打包後的 (cx, cy);value = 該桶的節點在 nodes 陣列的索引 */
+  cells: Map<number, number[]>;
+}
+
 export interface GraphLayout {
   nodes: LayoutNode[];
   edges: LayoutEdge[];
@@ -61,4 +68,6 @@ export interface GraphLayout {
   rings: Map<string, number> | null;
   /** Louvain 社群偵測結果:channel_id → 社群編號(依社群大小排序) */
   communities: Map<string, number> | null;
+  /** hitTest 的空間索引 */
+  hitGrid: HitGrid;
 }

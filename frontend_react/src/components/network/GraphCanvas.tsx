@@ -176,9 +176,23 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(function Gra
       const rect = canvas.getBoundingClientRect();
       return screenToWorld(e.clientX - rect.left, e.clientY - rect.top);
     };
-    const moveHandler = (e: MouseEvent) => {
+
+    // mousemove 用 rAF 節流:同一幀內只處理最後一次事件,
+    // 避免高頻 mousemove(120Hz+)每次都觸發 hitTest+重繪
+    let pendingMove: MouseEvent | null = null;
+    let moveRafId: number | null = null;
+    const flushMove = () => {
+      moveRafId = null;
+      const e = pendingMove;
+      pendingMove = null;
+      if (!e) return;
       const w = toWorld(e);
       onHoverRef.current?.(w.x, w.y, e);
+    };
+    const moveHandler = (e: MouseEvent) => {
+      pendingMove = e;
+      if (moveRafId !== null) return;
+      moveRafId = requestAnimationFrame(flushMove);
     };
     const clickHandler = (e: MouseEvent) => {
       const w = toWorld(e);
@@ -188,6 +202,7 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(function Gra
     canvas.addEventListener("mousemove", moveHandler);
     canvas.addEventListener("click", clickHandler);
     return () => {
+      if (moveRafId !== null) cancelAnimationFrame(moveRafId);
       canvas.removeEventListener("mousemove", moveHandler);
       canvas.removeEventListener("click", clickHandler);
     };

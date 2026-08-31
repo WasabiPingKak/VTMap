@@ -13,7 +13,7 @@ import type { CanvasTransform } from "./GraphCanvas";
 import type { GraphLayout, LayoutNode } from "@/types/network";
 import { channelInitial } from "./displayName";
 import { communityColor } from "./communities";
-import { EGO_OUTER_RING } from "./layout";
+import { EGO_OUTER_RING, packHitCell } from "./layout";
 import {
   FONT_BASE,
   FONT_MIN_SCALE,
@@ -80,14 +80,24 @@ export function createStarField(count = 260, spread = 2600) {
 
 function hexPath(ctx: CanvasRenderingContext2D, x: number, y: number, r: number) {
   ctx.beginPath();
+  addHexToPath(ctx, x, y, r);
+}
+
+/** 同 hexPath 但不 beginPath,可累加到 Path2D 做批次描邊 */
+function addHexToPath(
+  target: CanvasRenderingContext2D | Path2D,
+  x: number,
+  y: number,
+  r: number,
+) {
   for (let i = 0; i < 6; i++) {
     const angle = (Math.PI / 3) * i - Math.PI / 2;
     const px = x + r * Math.cos(angle);
     const py = y + r * Math.sin(angle);
-    if (i === 0) ctx.moveTo(px, py);
-    else ctx.lineTo(px, py);
+    if (i === 0) target.moveTo(px, py);
+    else target.lineTo(px, py);
   }
-  ctx.closePath();
+  target.closePath();
 }
 
 // ── Sprite 快取 ─────────────────────────────────────────
@@ -508,11 +518,17 @@ export function drawNetwork(
   ctx.globalAlpha = 1;
 
   // ── 節點 ──
+  // 外框依 (color, width, alpha) 分桶,收成 Path2D 於節點迴圈後一次 stroke(千節點省下大量 GPU submit)
+  const strokeGroups = canBatchEdges
+    ? new Map<string, { color: string; width: number; alpha: number; path: Path2D }>()
+    : null;
+
   layout.nodes.forEach((node, i) => {
     if (!visible[i]) return;
     const { color, glow, dim } = nodeVisual(node, state);
     const hovered = state.hoveredId === node.node.channel_id;
-    ctx.globalAlpha = dim && !hovered ? NODE_DIM_ALPHA : 1;
+    const nodeAlpha = dim && !hovered ? NODE_DIM_ALPHA : 1;
+    ctx.globalAlpha = nodeAlpha;
 
     if (dotsOnly) {
       ctx.fillStyle = color;
@@ -563,12 +579,32 @@ export function drawNetwork(
       ctx.fillText(channelInitial(node.node), node.x, node.y + 1);
     }
 
-    // 狀態色邊框(每幀直接畫,變色不需重生 sprite)
-    hexPath(ctx, node.x, node.y, HEX_RADIUS);
-    ctx.strokeStyle = color;
-    ctx.lineWidth = hovered ? 3 : 2;
-    ctx.stroke();
+    // 狀態色邊框:批次收集或逐一 stroke(fallback)
+    const strokeWidth = hovered ? 3 : 2;
+    if (strokeGroups) {
+      const key = `${color}|${strokeWidth}|${nodeAlpha}`;
+      let group = strokeGroups.get(key);
+      if (!group) {
+        group = { color, width: strokeWidth, alpha: nodeAlpha, path: new Path2D() };
+        strokeGroups.set(key, group);
+      }
+      addHexToPath(group.path, node.x, node.y, HEX_RADIUS);
+    } else {
+      hexPath(ctx, node.x, node.y, HEX_RADIUS);
+      ctx.strokeStyle = color;
+      ctx.lineWidth = strokeWidth;
+      ctx.stroke();
+    }
   });
+
+  if (strokeGroups) {
+    for (const group of strokeGroups.values()) {
+      ctx.globalAlpha = group.alpha;
+      ctx.strokeStyle = group.color;
+      ctx.lineWidth = group.width;
+      ctx.stroke(group.path);
+    }
+  }
   ctx.globalAlpha = 1;
 
   // ── 標籤(固定在節點下方置中;layout 已保證互不重疊)──
@@ -641,15 +677,27 @@ function drawLabels(
   ctx.globalAlpha = 1;
 }
 
-/** 命中測試:回傳座標下的節點(六角形以外接圓近似) */
+/** 命中測試:走 hitGrid 只掃 3×3 桶,取繪製順序最上層的命中節點 */
 export function hitTest(layout: GraphLayout, worldX: number, worldY: number): LayoutNode | null {
+  const { hitGrid, nodes } = layout;
+  const { cellSize, cells } = hitGrid;
+  const cx = Math.floor(worldX / cellSize);
+  const cy = Math.floor(worldY / cellSize);
   const r2 = (HEX_RADIUS + 4) ** 2;
-  // 由後往前(繪製順序上層優先)
-  for (let i = layout.nodes.length - 1; i >= 0; i--) {
-    const n = layout.nodes[i];
-    const dx = n.x - worldX;
-    const dy = n.y - worldY;
-    if (dx * dx + dy * dy <= r2) return n;
+
+  let bestIndex = -1;
+  for (let dx = -1; dx <= 1; dx++) {
+    for (let dy = -1; dy <= 1; dy++) {
+      const bucket = cells.get(packHitCell(cx + dx, cy + dy));
+      if (!bucket) continue;
+      for (const i of bucket) {
+        if (i <= bestIndex) continue;
+        const n = nodes[i];
+        const ddx = n.x - worldX;
+        const ddy = n.y - worldY;
+        if (ddx * ddx + ddy * ddy <= r2) bestIndex = i;
+      }
+    }
   }
-  return null;
+  return bestIndex >= 0 ? nodes[bestIndex] : null;
 }
