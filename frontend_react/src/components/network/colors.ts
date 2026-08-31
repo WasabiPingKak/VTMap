@@ -20,6 +20,9 @@ export const EDGE_COLOR = "rgba(148,163,184,0.9)";
 export const EDGE_ALPHA = 0.1;
 export const EDGE_HIGHLIGHT_ALPHA = 0.75;
 export const EDGE_DIM_ALPHA = 0.05;
+/** ego 模式:hop-1/hop-2 邊的 alpha,比一般 base 邊(0.1)高、比 hover/focus 高亮(0.75)低,
+ *  用來讓分層結構本身就看得見,不用等 hover 才浮現 */
+export const EDGE_HOP_ALPHA = 0.45;
 
 export const LABEL_COLOR = "rgba(255,255,255,0.85)";
 export const LABEL_DIM = "rgba(255,255,255,0.35)";
