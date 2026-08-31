@@ -589,8 +589,19 @@ export function drawNetwork(
   // 邊視為「螢幕上一個點」的世界長度門檻:低於此長度直接跳過(dense hub 遠景省下大量繪製)
   const edgeMinWorldLen = EDGE_MIN_SCREEN_LEN / scale;
   const edgeMinWorldLenSq = edgeMinWorldLen * edgeMinWorldLen;
+  // ego 模式:兩端都在外圍的邊 alpha=0.05 幾乎不可見,dense 圖多數屬於此類,整批跳過
+  const rings = layout.rings;
 
   for (const { edge, source, target } of layout.edges) {
+    // ego 模式外圍-外圍邊直接跳過(視覺雜訊,佔絕大多數)
+    if (
+      rings &&
+      rings.get(edge.a) === EGO_OUTER_RING &&
+      rings.get(edge.b) === EGO_OUTER_RING
+    ) {
+      continue;
+    }
+
     // 線段外接框不與視野相交 → 跳過
     if (
       Math.max(source.x, target.x) < viewMinX ||
@@ -676,8 +687,9 @@ export function drawNetwork(
       if (!img) state.requestImage?.(node.node.thumbnail);
     }
 
-    // 光暈(依狀態光暈色共用 sprite,不依節點);縮放太小時完全不畫
-    if (drawGlow) {
+    // 光暈(依狀態光暈色共用 sprite,不依節點)
+    // dim 節點本身已 alpha 0.25,再疊 glow 幾乎看不見;縮放太小時也完全不畫
+    if (drawGlow && !isDim) {
       const glowSprite = getGlowSprite(nGlows[i], bucket);
       if (glowSprite) {
         ctx.drawImage(
