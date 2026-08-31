@@ -56,6 +56,27 @@ const NetworkGraph = forwardRef<NetworkGraphHandle, NetworkGraphProps>(function 
     focusedIdRef.current = focusedId;
   }, [focusedId]);
 
+  // 外框顏色的參考點:目前選取優先,其次圓心;BFS 兩層跳數
+  const referenceId = focusedId ?? egoCenterId;
+  const hopDistances = useMemo(() => {
+    if (!referenceId || !layout.byId.has(referenceId)) return null;
+    const distances = new Map<string, number>([[referenceId, 0]]);
+    let frontier = [referenceId];
+    for (let hop = 1; hop <= 2; hop++) {
+      const next: string[] = [];
+      for (const id of frontier) {
+        for (const neighbor of layout.neighbors.get(id) ?? []) {
+          if (!distances.has(neighbor)) {
+            distances.set(neighbor, hop);
+            next.push(neighbor);
+          }
+        }
+      }
+      frontier = next;
+    }
+    return distances;
+  }, [layout, referenceId]);
+
   const onRender = useCallback(
     (ctx: CanvasRenderingContext2D, transform: CanvasTransform, size: { width: number; height: number }) => {
       const focused = focusedIdRef.current;
@@ -65,13 +86,14 @@ const NetworkGraph = forwardRef<NetworkGraphHandle, NetworkGraphProps>(function 
         hoveredId: hoveredIdRef.current,
         focusedId: focused,
         highlightIds: focused ? (layout.neighbors.get(focused) ?? new Set()) : null,
+        hopDistances,
         starField,
         requestImage,
         requestRepaint: () => canvasRef.current?.requestRender(),
       };
       drawNetwork(ctx, transform, size.width, size.height, state);
     },
-    [layout, starField, imagesRef, requestImage],
+    [layout, hopDistances, starField, imagesRef, requestImage],
   );
 
   const onHover = useCallback(

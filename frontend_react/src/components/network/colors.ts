@@ -5,15 +5,16 @@
 export const BG_COLOR = "#080d15";
 export const BG_CENTER = "#0d1526";
 
-// 節點狀態色(優先序:聚焦 > 鄰居 > 站內收錄 > 站外發現)
+// 節點外框色 = 與「參考點」(目前選取,無選取時為圓心)的關係距離:
+// 金=參考點本人、綠=隔一層、藍=隔兩層、灰=更遠或無參考點
 export const FOCUSED_COLOR = "#D4A017";
 export const FOCUSED_GLOW = "rgba(212,160,23,0.8)";
 export const NEIGHBOR_COLOR = "#22c55e";
 export const NEIGHBOR_GLOW = "rgba(34,197,94,0.7)";
-export const IN_VTMAP_COLOR = "#38bdf8";
-export const IN_VTMAP_GLOW = "rgba(56,189,248,0.6)";
-export const DISCOVERED_COLOR = "#64748b";
-export const DISCOVERED_GLOW = "rgba(100,116,139,0.5)";
+export const HOP2_COLOR = "#38bdf8";
+export const HOP2_GLOW = "rgba(56,189,248,0.6)";
+export const FAR_COLOR = "#64748b";
+export const FAR_GLOW = "rgba(100,116,139,0.5)";
 
 export const EDGE_COLOR = "rgba(148,163,184,0.9)";
 export const EDGE_ALPHA = 0.1;
