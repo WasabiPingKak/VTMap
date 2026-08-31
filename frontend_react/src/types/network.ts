@@ -84,4 +84,10 @@ export interface GraphLayout {
   communities: Map<string, number> | null;
   /** hitTest 的空間索引 */
   hitGrid: HitGrid;
+  /**
+   * ego 模式外圍相關邊(至少一端在外圍)預烘的 Path2D,依線寬桶分組。
+   * 這些邊 alpha 固定 0.05,幾何固定,frame 迴圈用一次 stroke 畫完取代 iterate 上萬邊。
+   * 非 ego 模式為 null。Path2D 不可用時(測試環境)也為 null,渲染 fallback 走 frame 迴圈。
+   */
+  outerEdgePaths: Map<number, Path2D> | null;
 }
