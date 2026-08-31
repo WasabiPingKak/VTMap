@@ -23,6 +23,9 @@ export const EDGE_DIM_ALPHA = 0.05;
 /** ego 模式:hop-1/hop-2 邊的 alpha,比一般 base 邊(0.1)高、比 hover/focus 高亮(0.75)低,
  *  用來讓分層結構本身就看得見,不用等 hover 才浮現 */
 export const EDGE_HOP_ALPHA = 0.45;
+// ego 模式邊色比節點色更暗一階(green-700 / sky-700),避免叢集內線與點同色糊成一團
+export const HOP1_EDGE_COLOR = "#15803d";
+export const HOP2_EDGE_COLOR = "#0369a1";
 
 export const LABEL_COLOR = "rgba(255,255,255,0.85)";
 export const LABEL_DIM = "rgba(255,255,255,0.35)";

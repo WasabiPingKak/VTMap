@@ -214,6 +214,40 @@ function computeEgoPositions(
   const ticks = Math.ceil(Math.log(sim.alphaMin()) / Math.log(1 - sim.alphaDecay()));
   sim.tick(ticks);
 
+  // 硬性徑向分帶:sim 決定角度,再把 hop2/outer 沿原角度往外推,
+  // 確保 hop1(綠)半徑嚴格小於 hop2(藍)、hop2 嚴格小於 outer,不再交錯。
+  const BAND_GAP = 60;
+  let maxHop1 = 0;
+  for (const sn of simNodes) {
+    if (rings.get(sn.id) === 1) {
+      const r = Math.hypot(sn.x ?? 0, sn.y ?? 0);
+      if (r > maxHop1) maxHop1 = r;
+    }
+  }
+  const hop2Floor = maxHop1 + BAND_GAP;
+  let maxHop2 = 0;
+  for (const sn of simNodes) {
+    if (rings.get(sn.id) !== 2) continue;
+    const r = Math.hypot(sn.x ?? 0, sn.y ?? 0);
+    if (r < hop2Floor && r > 0.01) {
+      const s = hop2Floor / r;
+      sn.x = (sn.x ?? 0) * s;
+      sn.y = (sn.y ?? 0) * s;
+    }
+    const newR = Math.hypot(sn.x ?? 0, sn.y ?? 0);
+    if (newR > maxHop2) maxHop2 = newR;
+  }
+  const outerFloor = maxHop2 + BAND_GAP;
+  for (const sn of simNodes) {
+    if (rings.get(sn.id) !== EGO_OUTER_RING) continue;
+    const r = Math.hypot(sn.x ?? 0, sn.y ?? 0);
+    if (r < outerFloor && r > 0.01) {
+      const s = outerFloor / r;
+      sn.x = (sn.x ?? 0) * s;
+      sn.y = (sn.y ?? 0) * s;
+    }
+  }
+
   return simNodes.map((sn) => ({ x: sn.x ?? 0, y: sn.y ?? 0 }));
 }
 

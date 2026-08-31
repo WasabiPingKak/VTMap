@@ -33,7 +33,9 @@ import {
   FAR_GLOW,
   FOCUSED_COLOR,
   FOCUSED_GLOW,
+  HOP1_EDGE_COLOR,
   HOP2_COLOR,
+  HOP2_EDGE_COLOR,
   HOP2_GLOW,
   LABEL_COLOR,
   LABEL_DIM,
@@ -768,7 +770,7 @@ export function drawNetwork(
     // ego 模式:hop1(中心↔hop1、hop1↔hop1)塗綠、hop2(hop1↔hop2、hop2↔hop2)塗藍,
     // 讓分層結構本身就看得見,不用等 hover 才浮現
     if (baked.baseHop1?.size) {
-      ctx.strokeStyle = NEIGHBOR_COLOR;
+      ctx.strokeStyle = HOP1_EDGE_COLOR;
       ctx.globalAlpha = hopAlpha;
       for (const [widthBucket, path] of baked.baseHop1) {
         ctx.lineWidth = widthBucket / scale;
@@ -776,7 +778,7 @@ export function drawNetwork(
       }
     }
     if (baked.baseHop2?.size) {
-      ctx.strokeStyle = HOP2_COLOR;
+      ctx.strokeStyle = HOP2_EDGE_COLOR;
       ctx.globalAlpha = hopAlpha;
       for (const [widthBucket, path] of baked.baseHop2) {
         ctx.lineWidth = widthBucket / scale;
