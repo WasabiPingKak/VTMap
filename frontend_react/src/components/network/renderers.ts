@@ -68,6 +68,17 @@ export interface BakedDimLayer {
   worldH: number;
 }
 
+/** dim 邊層的預烘 offscreen canvas(ego 模式用):
+ *  - canvas 涵蓋所有外圍相關(egoDim>0)邊的 AABB
+ *  - 每幀單一 drawImage 取代 per-widthBucket 的 Path2D stroke,GPU 端省下大量 bezier 光柵化 */
+export interface BakedDimEdgeLayer {
+  canvas: HTMLCanvasElement;
+  worldX: number;
+  worldY: number;
+  worldW: number;
+  worldH: number;
+}
+
 export interface RenderState {
   layout: GraphLayout;
   images: Map<string, HTMLImageElement>;
@@ -84,6 +95,8 @@ export interface RenderState {
   requestRepaint?: () => void;
   /** dim 節點層預烘結果;有值時節點迴圈跳過 dim 節點的 sprite drawImage,改成整層 blit */
   bakedDimLayer?: BakedDimLayer | null;
+  /** dim 邊層預烘結果;有值時跳過 per-widthBucket 的 stroke(path),改成整層 blit */
+  bakedDimEdgeLayer?: BakedDimEdgeLayer | null;
 }
 
 export function createStarField(count = 260, spread = 2600) {
@@ -335,6 +348,65 @@ export function bakeDimLayer(
     const img = n.node.thumbnail ? images.get(n.node.thumbnail) : undefined;
     drawNodeShape(ctx, n, img);
     ctx.restore();
+  }
+
+  return { canvas, worldX: minX - pad, worldY: minY - pad, worldW, worldH };
+}
+
+/**
+ * dim 邊層的固定線寬(世界單位;canvas 是 1px/world,所以也就是 canvas 像素):
+ * 只用來畫 ego 外圍相關的邊(alpha 0.05)。刻意不做 per-scale 反縮放,
+ * 讓縮放小時線變細(視覺雜訊少)、縮放大時稍粗(dim 但可辨識),對 dim 邊而言合理。
+ */
+const DIM_EDGE_BAKE_LINE_WIDTH = 1.5;
+
+/**
+ * 把 ego 模式下所有 dim(egoDim>0)邊的曲線烘進單一 offscreen canvas。
+ * 每幀渲染時 drawImage 一次覆蓋所有 dim 邊,取代 per-widthBucket 的 stroke(數個到十幾個 GPU submit 省成一次)。
+ * 超過尺寸上限則回傳 null,渲染 fallback 走原本的 Path2D stroke。
+ */
+export function bakeDimEdgeLayer(layout: GraphLayout): BakedDimEdgeLayer | null {
+  if (typeof document === "undefined") return null;
+  const bakedDim = layout.bakedEdges?.dim;
+  if (!bakedDim || bakedDim.size === 0) return null;
+
+  // AABB 從 dim 邊(egoDim>0)的 boxMin/Max 取,不掃 base 邊
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  let hasAny = false;
+  for (const le of layout.edges) {
+    if (le.egoDim === 0) continue;
+    hasAny = true;
+    if (le.boxMinX < minX) minX = le.boxMinX;
+    if (le.boxMinY < minY) minY = le.boxMinY;
+    if (le.boxMaxX > maxX) maxX = le.boxMaxX;
+    if (le.boxMaxY > maxY) maxY = le.boxMaxY;
+  }
+  if (!hasAny) return null;
+
+  // pad 涵蓋 bezier 控制點外凸 + 線寬本身
+  const pad = 40;
+  const worldW = maxX - minX + pad * 2;
+  const worldH = maxY - minY + pad * 2;
+  const canvasW = Math.ceil(worldW * DIM_LAYER_PX_PER_WORLD);
+  const canvasH = Math.ceil(worldH * DIM_LAYER_PX_PER_WORLD);
+  if (canvasW > DIM_LAYER_MAX_PX || canvasH > DIM_LAYER_MAX_PX) return null;
+
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(canvasW, 1);
+  canvas.height = Math.max(canvasH, 1);
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return null;
+
+  ctx.scale(DIM_LAYER_PX_PER_WORLD, DIM_LAYER_PX_PER_WORLD);
+  ctx.translate(-minX + pad, -minY + pad);
+  ctx.strokeStyle = EDGE_COLOR;
+  ctx.lineWidth = DIM_EDGE_BAKE_LINE_WIDTH;
+  // canvas 內全 alpha,EDGE_DIM_ALPHA 在 blit 時一次上,避免多次 alpha 累加
+  for (const [, path] of bakedDim) {
+    ctx.stroke(path);
   }
 
   return { canvas, worldX: minX - pad, worldY: minY - pad, worldW, worldH };
@@ -691,12 +763,26 @@ export function drawNetwork(
       ctx.lineWidth = widthBucket / scale;
       ctx.stroke(path);
     }
-    // dim:ego 外圍相關,alpha 固定 EDGE_DIM_ALPHA
+    // dim:ego 外圍相關,alpha 固定 EDGE_DIM_ALPHA。
+    // 有預烘 bitmap 就一次 blit 覆蓋(GPU 端省下上千條 bezier 光柵化);
+    // 沒有(fallback:超過尺寸上限或建立失敗)則走原本 per-widthBucket stroke。
     if (baked.dim) {
-      ctx.globalAlpha = EDGE_DIM_ALPHA;
-      for (const [widthBucket, path] of baked.dim) {
-        ctx.lineWidth = widthBucket / scale;
-        ctx.stroke(path);
+      const bakedDimEdges = state.bakedDimEdgeLayer;
+      if (bakedDimEdges) {
+        ctx.globalAlpha = EDGE_DIM_ALPHA;
+        ctx.drawImage(
+          bakedDimEdges.canvas,
+          bakedDimEdges.worldX,
+          bakedDimEdges.worldY,
+          bakedDimEdges.worldW,
+          bakedDimEdges.worldH,
+        );
+      } else {
+        ctx.globalAlpha = EDGE_DIM_ALPHA;
+        for (const [widthBucket, path] of baked.dim) {
+          ctx.lineWidth = widthBucket / scale;
+          ctx.stroke(path);
+        }
       }
     }
 

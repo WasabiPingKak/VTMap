@@ -14,6 +14,7 @@ import {
 import GraphCanvas, { type GraphCanvasHandle, type CanvasTransform } from "./GraphCanvas";
 import { computeLayout } from "./layout";
 import {
+  bakeDimEdgeLayer,
   bakeDimLayer,
   createStarField,
   drawNetwork,
@@ -93,6 +94,14 @@ const NetworkGraph = forwardRef<NetworkGraphHandle, NetworkGraphProps>(function 
     return () => clearTimeout(timer);
   }, [layout, imagesRef]);
 
+  // ego 模式 dim 邊層的預烘:layout 完成後烘一次,不隨圖片載入改變(邊不含頭像),
+  // 所以 useMemo 就夠了(不像 bakedDimLayer 需要 3 秒後 re-bake 頭像)。
+  // 之後 per-frame 只需 1 次 drawImage 覆蓋所有 dim 邊,GPU 端省下上千條 bezier 光柵化。
+  const bakedDimEdgeLayer = useMemo(
+    () => (layout ? bakeDimEdgeLayer(layout) : null),
+    [layout],
+  );
+
   const focusedIdRef = useRef(focusedId);
   useEffect(() => {
     focusedIdRef.current = focusedId;
@@ -134,10 +143,11 @@ const NetworkGraph = forwardRef<NetworkGraphHandle, NetworkGraphProps>(function 
         requestImage,
         requestRepaint: () => canvasRef.current?.requestRender(),
         bakedDimLayer,
+        bakedDimEdgeLayer,
       };
       drawNetwork(ctx, transform, size.width, size.height, state);
     },
-    [layout, hopDistances, starField, imagesRef, requestImage, bakedDimLayer],
+    [layout, hopDistances, starField, imagesRef, requestImage, bakedDimLayer, bakedDimEdgeLayer],
   );
 
   const onHover = useCallback(
