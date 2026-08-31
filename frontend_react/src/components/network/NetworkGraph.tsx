@@ -9,12 +9,13 @@ import {
   useImperativeHandle,
   useMemo,
   useRef,
+  useState,
 } from "react";
 import GraphCanvas, { type GraphCanvasHandle, type CanvasTransform } from "./GraphCanvas";
 import { computeLayout } from "./layout";
 import { createStarField, drawNetwork, hitTest, type RenderState } from "./renderers";
 import { useImageCache } from "./useImageCache";
-import type { NetworkGraphData } from "@/types/network";
+import type { GraphLayout, NetworkGraphData } from "@/types/network";
 
 interface NetworkGraphProps {
   data: NetworkGraphData;
@@ -41,10 +42,26 @@ const NetworkGraph = forwardRef<NetworkGraphHandle, NetworkGraphProps>(function 
   const canvasRef = useRef<GraphCanvasHandle | null>(null);
   const hoveredIdRef = useRef<string | null>(null);
 
-  const layout = useMemo(
-    () => computeLayout(data, undefined, egoCenterId ? { centerId: egoCenterId } : undefined),
-    [data, egoCenterId],
-  );
+  // Layout 計算改 async(setTimeout 讓 spinner 先繪出),避免第一次進頁凍結 ~700ms。
+  // 舊 layout 保留可見直到新的算完(切換 ego 圓心不會閃爍空畫面)。
+  const [layout, setLayout] = useState<GraphLayout | null>(null);
+  const [isComputing, setIsComputing] = useState(true);
+  useEffect(() => {
+    // 立刻進入 loading 是刻意的:讓 spinner 蓋在舊 layout 上,setTimeout 才讓瀏覽器繪出 spinner
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setIsComputing(true);
+    const timer = setTimeout(() => {
+      const next = computeLayout(
+        data,
+        undefined,
+        egoCenterId ? { centerId: egoCenterId } : undefined,
+      );
+      setLayout(next);
+      setIsComputing(false);
+    }, 30);
+    return () => clearTimeout(timer);
+  }, [data, egoCenterId]);
+
   const starField = useMemo(() => createStarField(), []);
 
   const { cacheRef: imagesRef, requestImage } = useImageCache(
@@ -59,7 +76,7 @@ const NetworkGraph = forwardRef<NetworkGraphHandle, NetworkGraphProps>(function 
   // 外框顏色的參考點:目前選取優先,其次圓心;BFS 兩層跳數
   const referenceId = focusedId ?? egoCenterId;
   const hopDistances = useMemo(() => {
-    if (!referenceId || !layout.byId.has(referenceId)) return null;
+    if (!layout || !referenceId || !layout.byId.has(referenceId)) return null;
     const distances = new Map<string, number>([[referenceId, 0]]);
     let frontier = [referenceId];
     for (let hop = 1; hop <= 2; hop++) {
@@ -79,6 +96,7 @@ const NetworkGraph = forwardRef<NetworkGraphHandle, NetworkGraphProps>(function 
 
   const onRender = useCallback(
     (ctx: CanvasRenderingContext2D, transform: CanvasTransform, size: { width: number; height: number }) => {
+      if (!layout) return;
       const focused = focusedIdRef.current;
       const state: RenderState = {
         layout,
@@ -98,6 +116,7 @@ const NetworkGraph = forwardRef<NetworkGraphHandle, NetworkGraphProps>(function 
 
   const onHover = useCallback(
     (x: number, y: number, event: MouseEvent) => {
+      if (!layout) return;
       const hit = hitTest(layout, x, y);
       const id = hit?.node.channel_id ?? null;
       if (id !== hoveredIdRef.current) {
@@ -111,6 +130,7 @@ const NetworkGraph = forwardRef<NetworkGraphHandle, NetworkGraphProps>(function 
 
   const onClick = useCallback(
     (x: number, y: number) => {
+      if (!layout) return;
       const hit = hitTest(layout, x, y);
       onFocusChange(hit ? hit.node.channel_id : null);
     },
@@ -120,7 +140,7 @@ const NetworkGraph = forwardRef<NetworkGraphHandle, NetworkGraphProps>(function 
   // dev 專用 benchmark 模式:?benchmark=1 時飛到最大 hub(完整細節縮放),連續重繪量測穩態幀時間
   const benchArmed = useRef(false);
   useEffect(() => {
-    if (!import.meta.env.DEV || benchArmed.current || !layout.nodes.length) return;
+    if (!import.meta.env.DEV || benchArmed.current || !layout || !layout.nodes.length) return;
     const params = new URLSearchParams(window.location.search);
     if (!params.has("benchmark")) return;
     benchArmed.current = true;
@@ -153,7 +173,7 @@ const NetworkGraph = forwardRef<NetworkGraphHandle, NetworkGraphProps>(function 
   // 初次載入:fit 全圖
   const didInitialFit = useRef(false);
   useEffect(() => {
-    if (didInitialFit.current || !layout.nodes.length) return;
+    if (didInitialFit.current || !layout || !layout.nodes.length) return;
     didInitialFit.current = true;
     const { minX, minY, maxX, maxY } = layout.bounds;
     // 等 canvas 完成第一次 resize
@@ -165,7 +185,7 @@ const NetworkGraph = forwardRef<NetworkGraphHandle, NetworkGraphProps>(function 
   useEffect(() => {
     if (prevEgoRef.current === egoCenterId) return;
     prevEgoRef.current = egoCenterId;
-    if (!layout.nodes.length) return;
+    if (!layout || !layout.nodes.length) return;
 
     let minX = Infinity;
     let minY = Infinity;
@@ -187,7 +207,7 @@ const NetworkGraph = forwardRef<NetworkGraphHandle, NetworkGraphProps>(function 
   // 聚焦變化:相機移過去 + 重繪
   useEffect(() => {
     canvasRef.current?.requestRender();
-    if (!focusedId) return;
+    if (!focusedId || !layout) return;
     const node = layout.byId.get(focusedId);
     if (!node) return;
     const scale = Math.max(canvasRef.current?.getTransform().scale ?? 1, 0.9);
@@ -200,10 +220,12 @@ const NetworkGraph = forwardRef<NetworkGraphHandle, NetworkGraphProps>(function 
       zoomIn: () => canvasRef.current?.zoomIn(),
       zoomOut: () => canvasRef.current?.zoomOut(),
       fitAll: () => {
+        if (!layout) return;
         const { minX, minY, maxX, maxY } = layout.bounds;
         canvasRef.current?.fitBounds(minX, minY, maxX, maxY);
       },
       panToNode: (channelId: string) => {
+        if (!layout) return false;
         const node = layout.byId.get(channelId);
         if (!node) return false;
         const scale = Math.max(canvasRef.current?.getTransform().scale ?? 1, 0.9);
@@ -214,7 +236,20 @@ const NetworkGraph = forwardRef<NetworkGraphHandle, NetworkGraphProps>(function 
     [layout, panelInset],
   );
 
-  return <GraphCanvas ref={canvasRef} onRender={onRender} onHover={onHover} onClick={onClick} />;
+  return (
+    <>
+      <GraphCanvas ref={canvasRef} onRender={onRender} onHover={onHover} onClick={onClick} />
+      {isComputing && (
+        <div className="absolute inset-0 flex items-center justify-center bg-slate-950/60 backdrop-blur-sm pointer-events-none z-10">
+          <div className="flex flex-col items-center gap-3 text-slate-200">
+            {/* CSS transform 動畫在 compositor 執行,layout 計算凍結主執行緒時仍會繼續轉 */}
+            <div className="w-10 h-10 border-4 border-slate-600 border-t-sky-400 rounded-full animate-spin" />
+            <div className="text-sm">整理關係中,請稍候…</div>
+          </div>
+        </div>
+      )}
+    </>
+  );
 });
 
 export default NetworkGraph;

@@ -50,12 +50,8 @@ const GLOW_MIN_SCALE = 0.4;
 const HALO_MIN_SCALE = 0.35;
 /** 縮放小於此值時 dim 節點的標籤本來就淡到看不清,跳過省下大量 label drawImage */
 const DIM_LABEL_MIN_SCALE = 1.0;
-/** 縮放小於此值時外圍邊糊成一片,不畫預烘 Path;高於此值時單一 stroke 恢復連線視覺 */
-const OUTER_EDGE_MIN_SCALE = 0.4;
 /** 社群暈染半徑(world px) */
 const HALO_RADIUS = 110;
-/** 邊在畫面上的長度小於此像素數就跳過(dense hub 在低縮放時直接省下大量 quadraticCurveTo) */
-const EDGE_MIN_SCREEN_LEN = 2;
 /** 視野裁剪的寬容邊距(world px,涵蓋暈染與標籤外溢) */
 const CULL_MARGIN = 160;
 
@@ -575,88 +571,90 @@ export function drawNetwork(
     }
   }
 
-  // ── 邊(輕微弧線;依透明度×線寬分組,聚合成少數路徑一次 stroke)──
-  const edgeAlpha = (edgeA: string, edgeB: string): number => {
-    let alpha = EDGE_ALPHA;
-    if (state.highlightIds !== null) {
-      const onFocus =
-        state.focusedId !== null && (edgeA === state.focusedId || edgeB === state.focusedId);
-      alpha = onFocus ? EDGE_HIGHLIGHT_ALPHA : EDGE_DIM_ALPHA;
-    } else if (state.hoveredId && (edgeA === state.hoveredId || edgeB === state.hoveredId)) {
-      alpha = EDGE_HIGHLIGHT_ALPHA;
-    }
-    // ego 模式:任一端在外圍的邊一律淡化
-    if (isEgoOuter(state, edgeA) || isEgoOuter(state, edgeB)) {
-      alpha = Math.min(alpha, EDGE_DIM_ALPHA);
-    }
-    return alpha;
-  };
-
+  // ── 邊 ──
+  // 架構:預烘的 base/dim Path2D 每幀單一 stroke 一次畫完;
+  //       hover/focus 高亮只 iterate edgesByNode 的相關小子集當 overlay 疊上去。
+  //       全部邊都可見(任何縮放),per-frame 邊成本 O(1) with GPU-side rasterization。
   ctx.strokeStyle = EDGE_COLOR;
   const canBatchEdges = typeof Path2D !== "undefined";
-  const edgeGroups = canBatchEdges
-    ? new Map<string, { alpha: number; width: number; path: Path2D }>()
-    : null;
+  const baked = layout.bakedEdges;
 
-  // 邊視為「螢幕上一個點」的世界長度平方門檻:低於此值直接跳過
-  const edgeMinWorldLenSq = (EDGE_MIN_SCREEN_LEN / scale) ** 2;
-  const layoutEdges = layout.edges;
-  const edgeCount = layoutEdges.length;
-
-  const hasBakedOuterEdges = layout.outerEdgePaths !== null;
-  for (let ei = 0; ei < edgeCount; ei++) {
-    const le = layoutEdges[ei];
-    // ego 模式:所有「至少一端在外圍」的邊都在預烘 Path2D 裡,frame 迴圈跳過
-    if (hasBakedOuterEdges && le.egoDim > 0) continue;
-    // 線段 AABB 不與視野相交 → 跳過(AABB 已預算)
-    if (
-      le.boxMaxX < viewMinX ||
-      le.boxMinX > viewMaxX ||
-      le.boxMaxY < viewMinY ||
-      le.boxMinY > viewMaxY
-    ) {
-      continue;
+  if (baked) {
+    // base:alpha 依 focus 狀態變(focused mode 下淡化)
+    const baseAlpha = state.focusedId !== null ? EDGE_DIM_ALPHA : EDGE_ALPHA;
+    ctx.globalAlpha = baseAlpha;
+    for (const [widthBucket, path] of baked.base) {
+      ctx.lineWidth = widthBucket / scale;
+      ctx.stroke(path);
     }
-    // 邊在畫面上小於 EDGE_MIN_SCREEN_LEN 像素 → 跳過
-    if (le.lenSq < edgeMinWorldLenSq) continue;
-
-    const alpha = edgeAlpha(le.edge.a, le.edge.b);
-
-    if (edgeGroups) {
-      const key = `${alpha}|${le.widthBucket}`;
-      let group = edgeGroups.get(key);
-      if (!group) {
-        group = { alpha, width: le.widthBucket, path: new Path2D() };
-        edgeGroups.set(key, group);
+    // dim:ego 外圍相關,alpha 固定 EDGE_DIM_ALPHA
+    if (baked.dim) {
+      ctx.globalAlpha = EDGE_DIM_ALPHA;
+      for (const [widthBucket, path] of baked.dim) {
+        ctx.lineWidth = widthBucket / scale;
+        ctx.stroke(path);
       }
-      group.path.moveTo(le.source.x, le.source.y);
-      group.path.quadraticCurveTo(le.controlX, le.controlY, le.target.x, le.target.y);
-    } else {
-      // fallback(測試環境等):逐邊繪製
-      ctx.globalAlpha = alpha;
+    }
+
+    // hover/focus 高亮 overlay:只 iterate 相關節點的鄰邊(通常 <500),疊在 baked 上
+    const highlightId = state.focusedId ?? state.hoveredId;
+    if (highlightId) {
+      const related = layout.edgesByNode.get(highlightId);
+      if (related && related.length) {
+        const rings = layout.rings;
+        const overlayGroups = new Map<number, Path2D>();
+        for (const le of related) {
+          // ego 模式下與外圍相關的邊 alpha 永遠 0.05,不 highlight(維持原視覺規則)
+          if (rings && le.egoDim > 0) continue;
+          let p = overlayGroups.get(le.widthBucket);
+          if (!p) {
+            p = new Path2D();
+            overlayGroups.set(le.widthBucket, p);
+          }
+          p.moveTo(le.source.x, le.source.y);
+          p.quadraticCurveTo(le.controlX, le.controlY, le.target.x, le.target.y);
+        }
+        if (overlayGroups.size) {
+          ctx.globalAlpha = EDGE_HIGHLIGHT_ALPHA;
+          for (const [widthBucket, path] of overlayGroups) {
+            ctx.lineWidth = widthBucket / scale;
+            ctx.stroke(path);
+          }
+        }
+      }
+    }
+  } else {
+    // fallback(測試環境無 Path2D):走原本 per-frame iterate 邏輯
+    const edgeAlpha = (edgeA: string, edgeB: string): number => {
+      let alpha = EDGE_ALPHA;
+      if (state.highlightIds !== null) {
+        const onFocus =
+          state.focusedId !== null && (edgeA === state.focusedId || edgeB === state.focusedId);
+        alpha = onFocus ? EDGE_HIGHLIGHT_ALPHA : EDGE_DIM_ALPHA;
+      } else if (state.hoveredId && (edgeA === state.hoveredId || edgeB === state.hoveredId)) {
+        alpha = EDGE_HIGHLIGHT_ALPHA;
+      }
+      if (isEgoOuter(state, edgeA) || isEgoOuter(state, edgeB)) {
+        alpha = Math.min(alpha, EDGE_DIM_ALPHA);
+      }
+      return alpha;
+    };
+    void canBatchEdges;
+    for (const le of layout.edges) {
+      if (
+        le.boxMaxX < viewMinX ||
+        le.boxMinX > viewMaxX ||
+        le.boxMaxY < viewMinY ||
+        le.boxMinY > viewMaxY
+      ) {
+        continue;
+      }
+      ctx.globalAlpha = edgeAlpha(le.edge.a, le.edge.b);
       ctx.lineWidth = le.widthBucket / scale;
       ctx.beginPath();
       ctx.moveTo(le.source.x, le.source.y);
       ctx.quadraticCurveTo(le.controlX, le.controlY, le.target.x, le.target.y);
       ctx.stroke();
-    }
-  }
-
-  if (edgeGroups) {
-    for (const group of edgeGroups.values()) {
-      ctx.globalAlpha = group.alpha;
-      ctx.lineWidth = group.width / scale;
-      ctx.stroke(group.path);
-    }
-  }
-
-  // 預烘的外圍邊(ego 模式;alpha 固定 EDGE_DIM_ALPHA):single stroke 一次畫完,
-  // 恢復外圍連線視覺卻不再 iterate 上萬條邊。低縮放時外圍邊糊成一片,跳過整批。
-  if (layout.outerEdgePaths && scale >= OUTER_EDGE_MIN_SCALE) {
-    ctx.globalAlpha = EDGE_DIM_ALPHA;
-    for (const [widthBucket, path] of layout.outerEdgePaths) {
-      ctx.lineWidth = widthBucket / scale;
-      ctx.stroke(path);
     }
   }
   ctx.globalAlpha = 1;

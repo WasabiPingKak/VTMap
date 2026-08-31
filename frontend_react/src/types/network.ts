@@ -85,9 +85,24 @@ export interface GraphLayout {
   /** hitTest 的空間索引 */
   hitGrid: HitGrid;
   /**
-   * ego 模式外圍相關邊(至少一端在外圍)預烘的 Path2D,依線寬桶分組。
-   * 這些邊 alpha 固定 0.05,幾何固定,frame 迴圈用一次 stroke 畫完取代 iterate 上萬邊。
-   * 非 ego 模式為 null。Path2D 不可用時(測試環境)也為 null,渲染 fallback 走 frame 迴圈。
+   * 預烘的邊 Path2D,依線寬桶分組。渲染時單一 stroke 一次畫完,
+   * 取代 per-frame iterate 上萬邊 + 每邊 Path2D group insert。
+   * Path2D 不可用時(測試環境)為 null,渲染 fallback 走 frame 迴圈。
    */
-  outerEdgePaths: Map<number, Path2D> | null;
+  bakedEdges: BakedEdges | null;
+  /** channel_id → 相連的 LayoutEdge 列表(hover/focus highlight overlay 用,避免掃全表) */
+  edgesByNode: Map<string, LayoutEdge[]>;
+}
+
+/**
+ * 邊分兩組:
+ * - base:alpha 隨 focus 狀態變(EDGE_ALPHA 或 EDGE_DIM_ALPHA)。
+ *   非 ego 模式的全部邊,或 ego 模式的 egoDim === 0 邊。
+ * - dim:alpha 固定 EDGE_DIM_ALPHA。ego 模式 egoDim > 0 的邊(至少一端外圍),
+ *   非 ego 模式為 null。
+ * 兩組獨立分線寬桶,避免不同 alpha 混合在一起。
+ */
+export interface BakedEdges {
+  base: Map<number, Path2D>;
+  dim: Map<number, Path2D> | null;
 }
