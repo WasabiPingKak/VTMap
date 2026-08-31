@@ -28,6 +28,7 @@ import {
   EDGE_COLOR,
   EDGE_DIM_ALPHA,
   EDGE_HIGHLIGHT_ALPHA,
+  EDGE_HOP_ALPHA,
   FAR_COLOR,
   FAR_GLOW,
   FOCUSED_COLOR,
@@ -748,20 +749,39 @@ export function drawNetwork(
   }
 
   // ── 邊 ──
-  // 架構:預烘的 base/dim Path2D 每幀單一 stroke 一次畫完;
+  // 架構:預烘的 base/baseHop1/baseHop2/dim Path2D 每幀單一 stroke 一次畫完;
   //       hover/focus 高亮只 iterate edgesByNode 的相關小子集當 overlay 疊上去。
   //       全部邊都可見(任何縮放),per-frame 邊成本 O(1) with GPU-side rasterization。
-  ctx.strokeStyle = EDGE_COLOR;
   const canBatchEdges = typeof Path2D !== "undefined";
   const baked = layout.bakedEdges;
 
   if (baked) {
-    // base:alpha 依 focus 狀態變(focused mode 下淡化)
+    // 非 ego / fallback:全部邊都在 base,灰色 EDGE_ALPHA。focus 時淡化讓 overlay 浮出。
     const baseAlpha = state.focusedId !== null ? EDGE_DIM_ALPHA : EDGE_ALPHA;
+    const hopAlpha = state.focusedId !== null ? EDGE_DIM_ALPHA : EDGE_HOP_ALPHA;
+    ctx.strokeStyle = EDGE_COLOR;
     ctx.globalAlpha = baseAlpha;
     for (const [widthBucket, path] of baked.base) {
       ctx.lineWidth = widthBucket / scale;
       ctx.stroke(path);
+    }
+    // ego 模式:hop1(中心↔hop1、hop1↔hop1)塗綠、hop2(hop1↔hop2、hop2↔hop2)塗藍,
+    // 讓分層結構本身就看得見,不用等 hover 才浮現
+    if (baked.baseHop1?.size) {
+      ctx.strokeStyle = NEIGHBOR_COLOR;
+      ctx.globalAlpha = hopAlpha;
+      for (const [widthBucket, path] of baked.baseHop1) {
+        ctx.lineWidth = widthBucket / scale;
+        ctx.stroke(path);
+      }
+    }
+    if (baked.baseHop2?.size) {
+      ctx.strokeStyle = HOP2_COLOR;
+      ctx.globalAlpha = hopAlpha;
+      for (const [widthBucket, path] of baked.baseHop2) {
+        ctx.lineWidth = widthBucket / scale;
+        ctx.stroke(path);
+      }
     }
     // dim:ego 外圍相關,alpha 固定 EDGE_DIM_ALPHA。
     // 有預烘 bitmap 就一次 blit 覆蓋(GPU 端省下上千條 bezier 光柵化);
@@ -786,7 +806,8 @@ export function drawNetwork(
       }
     }
 
-    // hover/focus 高亮 overlay:只 iterate 相關節點的鄰邊(通常 <500),疊在 baked 上
+    // hover/focus 高亮 overlay:只 iterate 相關節點的鄰邊(通常 <500),疊在 baked 上。
+    // 上面 hop-1/2 已切過 strokeStyle,此處要重設回 EDGE_COLOR。
     const highlightId = state.focusedId ?? state.hoveredId;
     if (highlightId) {
       const related = layout.edgesByNode.get(highlightId);
@@ -805,6 +826,7 @@ export function drawNetwork(
           p.quadraticCurveTo(le.controlX, le.controlY, le.target.x, le.target.y);
         }
         if (overlayGroups.size) {
+          ctx.strokeStyle = EDGE_COLOR;
           ctx.globalAlpha = EDGE_HIGHLIGHT_ALPHA;
           for (const [widthBucket, path] of overlayGroups) {
             ctx.lineWidth = widthBucket / scale;
@@ -814,7 +836,8 @@ export function drawNetwork(
       }
     }
   } else {
-    // fallback(測試環境無 Path2D):走原本 per-frame iterate 邏輯
+    // fallback(測試環境無 Path2D):走原本 per-frame iterate 邏輯,不做 hop 上色
+    ctx.strokeStyle = EDGE_COLOR;
     const edgeAlpha = (edgeA: string, edgeB: string): number => {
       let alpha = EDGE_ALPHA;
       if (state.highlightIds !== null) {

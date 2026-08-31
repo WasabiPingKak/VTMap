@@ -425,14 +425,27 @@ export function computeLayout(
   }
 
   // 把「全部邊的幾何」預烘進 per-widthBucket Path2D,渲染時一次 stroke 畫完取代 per-frame iterate。
-  // base:alpha 依 focus 狀態變(EDGE_ALPHA 或 EDGE_DIM_ALPHA);
-  // dim:ego 外圍相關,alpha 固定 EDGE_DIM_ALPHA。
+  // 非 ego:全部進 base(灰);ego:依「較外環」分 baseHop1/baseHop2(綠/藍),外圍相關進 dim。
   let bakedEdges: BakedEdges | null = null;
   if (typeof Path2D !== "undefined") {
     const base = new Map<number, Path2D>();
+    const baseHop1 = rings ? new Map<number, Path2D>() : null;
+    const baseHop2 = rings ? new Map<number, Path2D>() : null;
     const dim = rings ? new Map<number, Path2D>() : null;
     for (const le of edges) {
-      const bucket = dim && le.egoDim > 0 ? dim : base;
+      let bucket: Map<number, Path2D>;
+      if (rings) {
+        if (le.egoDim > 0) {
+          bucket = dim!;
+        } else {
+          // 兩端都在 rings 0-2:取較外環決定顏色(hop1=綠、hop2=藍)
+          const ra = rings.get(le.edge.a) ?? 0;
+          const rb = rings.get(le.edge.b) ?? 0;
+          bucket = Math.max(ra, rb) >= 2 ? baseHop2! : baseHop1!;
+        }
+      } else {
+        bucket = base;
+      }
       let p = bucket.get(le.widthBucket);
       if (!p) {
         p = new Path2D();
@@ -441,7 +454,7 @@ export function computeLayout(
       p.moveTo(le.source.x, le.source.y);
       p.quadraticCurveTo(le.controlX, le.controlY, le.target.x, le.target.y);
     }
-    bakedEdges = { base, dim };
+    bakedEdges = { base, baseHop1, baseHop2, dim };
   }
 
   // 每個節點的相連邊索引(hover/focus overlay 用,避免掃全表)
