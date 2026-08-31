@@ -48,7 +48,6 @@ describe("drawNetwork smoke", () => {
       hoveredId: null,
       focusedId: null,
       highlightIds: null,
-      hopDistances: null,
       starField: createStarField(10),
     };
     const { ctx, calls } = makeCtx();

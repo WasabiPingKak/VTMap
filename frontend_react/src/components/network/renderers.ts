@@ -4,7 +4,6 @@
  *
  * 效能設計(千節點規模):
  * - 節點畫面預渲染成 sprite 快取,熱路徑不跑 shadowBlur / clip
- * - sprite 依縮放分解析度桶,zoom-out 全景不做重度降採樣(每幀來源像素讀取量是瓶頸)
  * - 視野裁剪:螢幕外的節點、邊、暈染、標籤一律跳過
  * - 頭像延遲載入:節點實際可見時才發出圖片請求
  * - 漸層(背景、社群暈染)建立一次重複使用
@@ -25,16 +24,16 @@ import {
 import {
   BG_COLOR,
   BG_CENTER,
+  DISCOVERED_COLOR,
+  DISCOVERED_GLOW,
   EDGE_ALPHA,
   EDGE_COLOR,
   EDGE_DIM_ALPHA,
   EDGE_HIGHLIGHT_ALPHA,
-  FAR_COLOR,
-  FAR_GLOW,
   FOCUSED_COLOR,
   FOCUSED_GLOW,
-  HOP2_COLOR,
-  HOP2_GLOW,
+  IN_VTMAP_COLOR,
+  IN_VTMAP_GLOW,
   LABEL_COLOR,
   LABEL_DIM,
   NEIGHBOR_COLOR,
@@ -55,15 +54,11 @@ export interface RenderState {
   images: Map<string, HTMLImageElement>;
   hoveredId: string | null;
   focusedId: string | null;
-  /** 聚焦節點的鄰居 id(邊的亮暗判斷用) */
+  /** 聚焦節點的鄰居 id(含聚焦節點本身時視為高亮) */
   highlightIds: Set<string> | null;
-  /** 與參考點(選取優先,其次圓心)的跳數:0/1/2;不在表內 = 更遠 */
-  hopDistances: Map<string, number> | null;
   starField: { x: number; y: number; r: number; alpha: number }[];
   /** 要求載入頭像(延遲載入);未提供時不載圖 */
   requestImage?: (url: string) => void;
-  /** sprite 生成限額用盡時要求下一幀重繪(漸進補齊) */
-  requestRepaint?: () => void;
 }
 
 export function createStarField(count = 260, spread = 2600) {
@@ -98,30 +93,9 @@ const SPRITE_SCALE = 2;
 /** sprite 內容外擴(光暈用) */
 const SPRITE_PAD = 16;
 const SPRITE_HALF = HEX_RADIUS + SPRITE_PAD;
-// 每節點的 sprite 變體:有/無頭像 × 解析度桶,與顏色無關
-const MAX_SPRITE_CACHE = 5000;
-
-/** sprite 解析度桶(高→低;縮小檢視時用低解析來源,避免重度降採樣) */
-const SPRITE_BUCKETS = [1, 0.5, 0.25] as const;
-
-/**
- * 依有效縮放(css scale × dpr)選解析度桶:
- * 選最大的「仍小於有效縮放」的桶,降採樣比落在 1~2 倍之間。
- * zoom-out 時來源像素讀取量隨桶縮小,是千節點全景不卡的關鍵。
- */
-function spriteBucketFor(effectiveScale: number): number {
-  let bucket = 1;
-  while (bucket > 0.25 && bucket >= effectiveScale) bucket /= 2;
-  return bucket;
-}
-
-/** 每幀允許新建的 sprite 數(超過的下一幀補,消除一次性生成尖峰) */
-const SPRITE_BUDGET_PER_FRAME = 64;
-let spriteBudget = SPRITE_BUDGET_PER_FRAME;
-let spriteBudgetExhausted = false;
+const MAX_SPRITE_CACHE = 4000;
 
 const nodeSpriteCache = new Map<string, HTMLCanvasElement>();
-const glowSpriteCache = new Map<string, HTMLCanvasElement | null>();
 const haloSpriteCache = new Map<number, HTMLCanvasElement | null>();
 
 function createSpriteCanvas(size: number): CanvasRenderingContext2D | null {
@@ -132,74 +106,41 @@ function createSpriteCanvas(size: number): CanvasRenderingContext2D | null {
   return canvas.getContext("2d");
 }
 
-/** 光暈 sprite:每種狀態色 × 解析度桶一張,全部節點共用 */
-function getGlowSprite(glow: string, bucket: number): HTMLCanvasElement | null {
-  const key = `${glow}|${bucket}`;
-  const cached = glowSpriteCache.get(key);
-  if (cached !== undefined) return cached;
-
-  const size = SPRITE_HALF * 2 * SPRITE_SCALE * bucket;
-  const spriteCtx = createSpriteCanvas(size);
-  if (!spriteCtx) {
-    glowSpriteCache.set(key, null);
-    return null;
-  }
-  spriteCtx.scale(SPRITE_SCALE * bucket, SPRITE_SCALE * bucket);
-  spriteCtx.translate(SPRITE_HALF, SPRITE_HALF);
-  spriteCtx.shadowColor = glow;
-  // shadowBlur 不受 ctx 縮放影響,依桶換算維持等效光暈大小
-  spriteCtx.shadowBlur = 12 * bucket;
-  hexPath(spriteCtx, 0, 0, HEX_RADIUS);
-  spriteCtx.fillStyle = BG_CENTER;
-  spriteCtx.fill();
-  glowSpriteCache.set(key, spriteCtx.canvas);
-  return spriteCtx.canvas;
-}
-
-/** 節點 sprite:六角底 + 頭像(或首字)。與狀態色無關,變色不需重生。 */
+/** 節點 sprite:光暈 + 六角底 + 頭像(或首字)+ 邊框,一次畫好之後重複 blit */
 function getNodeSprite(
   node: LayoutNode,
+  color: string,
+  glow: string,
   img: HTMLImageElement | undefined,
-  bucket: number,
 ): HTMLCanvasElement | null {
-  const variant = img ? "img" : "txt";
-  const key = `${node.node.channel_id}|${variant}|${bucket}`;
+  const key = `${node.node.channel_id}|${color}|${img ? "img" : "txt"}`;
   const cached = nodeSpriteCache.get(key);
   if (cached) return cached;
 
-  if (spriteBudget <= 0) {
-    spriteBudgetExhausted = true;
-    // 其他解析度桶的現成 sprite 先頂著,下一幀再補正確的桶
-    for (const b of SPRITE_BUCKETS) {
-      if (b === bucket) continue;
-      const alt = nodeSpriteCache.get(`${node.node.channel_id}|${variant}|${b}`);
-      if (alt) return alt;
-    }
-    return null;
-  }
-
-  const size = SPRITE_HALF * 2 * SPRITE_SCALE * bucket;
+  const size = SPRITE_HALF * 2 * SPRITE_SCALE;
   const spriteCtx = createSpriteCanvas(size);
   if (!spriteCtx) return null;
-  spriteBudget -= 1;
 
-  spriteCtx.scale(SPRITE_SCALE * bucket, SPRITE_SCALE * bucket);
+  spriteCtx.scale(SPRITE_SCALE, SPRITE_SCALE);
   spriteCtx.translate(SPRITE_HALF, SPRITE_HALF);
   const r = HEX_RADIUS;
 
+  // 光暈(sprite 生成時付一次 shadowBlur 成本)
+  spriteCtx.save();
+  spriteCtx.shadowColor = glow;
+  spriteCtx.shadowBlur = 12;
+  hexPath(spriteCtx, 0, 0, r);
+  spriteCtx.fillStyle = BG_CENTER;
+  spriteCtx.fill();
+  spriteCtx.restore();
+
   if (img) {
-    hexPath(spriteCtx, 0, 0, r - 2);
-    spriteCtx.fillStyle = BG_CENTER;
-    spriteCtx.fill();
     spriteCtx.save();
     hexPath(spriteCtx, 0, 0, r - 2);
     spriteCtx.clip();
     spriteCtx.drawImage(img, -r, -r, r * 2, r * 2);
     spriteCtx.restore();
   } else {
-    hexPath(spriteCtx, 0, 0, r - 2);
-    spriteCtx.fillStyle = BG_CENTER;
-    spriteCtx.fill();
     hexPath(spriteCtx, 0, 0, r - 2);
     spriteCtx.fillStyle = "rgba(255,255,255,0.06)";
     spriteCtx.fill();
@@ -210,39 +151,32 @@ function getNodeSprite(
     spriteCtx.fillText(channelInitial(node.node), 0, 1);
   }
 
+  hexPath(spriteCtx, 0, 0, r);
+  spriteCtx.strokeStyle = color;
+  spriteCtx.lineWidth = 2;
+  spriteCtx.stroke();
+
   if (nodeSpriteCache.size >= MAX_SPRITE_CACHE) nodeSpriteCache.clear();
   const canvas = spriteCtx.canvas;
   nodeSpriteCache.set(key, canvas);
   return canvas;
 }
 
-/** 標籤 sprite:每個節點的多行標籤渲染一次(最壞情況字級 × 解析度桶),之後縮放 blit */
+/** 標籤 sprite:每個節點的多行標籤渲染一次(最壞情況字級 × 2 倍解析度),之後縮放 blit */
 const labelSpriteCache = new Map<string, HTMLCanvasElement | null>();
 const LABEL_SPRITE_SCALE = 2;
 const LABEL_SPRITE_PAD = 4;
 
-function getLabelSprite(node: LayoutNode, bucket: number): HTMLCanvasElement | null {
-  const key = `${node.node.channel_id}|${bucket}`;
+function getLabelSprite(node: LayoutNode): HTMLCanvasElement | null {
+  const key = node.node.channel_id;
   const cached = labelSpriteCache.get(key);
   if (cached !== undefined) return cached;
 
-  if (spriteBudget <= 0) {
-    spriteBudgetExhausted = true;
-    for (const b of SPRITE_BUCKETS) {
-      if (b === bucket) continue;
-      const alt = labelSpriteCache.get(`${node.node.channel_id}|${b}`);
-      if (alt) return alt;
-    }
-    return null;
-  }
-  spriteBudget -= 1;
-
-  const renderScale = LABEL_SPRITE_SCALE * bucket;
   const worstFont = FONT_BASE / FONT_MIN_SCALE;
   const lineHeight = worstFont * LINE_HEIGHT_RATIO;
-  const width = Math.ceil((node.labelHalfWidth * 2 + LABEL_SPRITE_PAD * 2) * renderScale);
+  const width = Math.ceil((node.labelHalfWidth * 2 + LABEL_SPRITE_PAD * 2) * LABEL_SPRITE_SCALE);
   const height = Math.ceil(
-    (node.labelLines.length * lineHeight + LABEL_SPRITE_PAD * 2) * renderScale,
+    (node.labelLines.length * lineHeight + LABEL_SPRITE_PAD * 2) * LABEL_SPRITE_SCALE,
   );
 
   if (typeof document === "undefined") {
@@ -258,7 +192,7 @@ function getLabelSprite(node: LayoutNode, bucket: number): HTMLCanvasElement | n
     return null;
   }
 
-  spriteCtx.scale(renderScale, renderScale);
+  spriteCtx.scale(LABEL_SPRITE_SCALE, LABEL_SPRITE_SCALE);
   spriteCtx.font = `${worstFont}px sans-serif`;
   spriteCtx.textAlign = "center";
   spriteCtx.textBaseline = "top";
@@ -354,34 +288,24 @@ function isEgoOuter(state: RenderState, id: string): boolean {
 
 function nodeVisual(node: LayoutNode, state: RenderState) {
   const id = node.node.channel_id;
-  const dim = isEgoOuter(state, id);
-  const distance = state.hopDistances?.get(id);
-  if (distance === 0) return { color: FOCUSED_COLOR, glow: FOCUSED_GLOW, dim: false };
-  if (distance === 1) return { color: NEIGHBOR_COLOR, glow: NEIGHBOR_GLOW, dim };
-  if (distance === 2) return { color: HOP2_COLOR, glow: HOP2_GLOW, dim };
-  return { color: FAR_COLOR, glow: FAR_GLOW, dim };
+  if (state.focusedId === id) return { color: FOCUSED_COLOR, glow: FOCUSED_GLOW, dim: false };
+  if (state.highlightIds?.has(id))
+    return { color: NEIGHBOR_COLOR, glow: NEIGHBOR_GLOW, dim: false };
+  const dim = state.highlightIds !== null || isEgoOuter(state, id);
+  if (node.node.in_vtmap) return { color: IN_VTMAP_COLOR, glow: IN_VTMAP_GLOW, dim };
+  return { color: DISCOVERED_COLOR, glow: DISCOVERED_GLOW, dim };
 }
 
 // ── 開發模式的幀時間量測 ──
 let frameTimes: number[] = [];
-const sectionTotals = new Map<string, number>();
 function recordFrameTime(ms: number) {
   frameTimes.push(ms);
   if (frameTimes.length >= 20) {
     const avg = frameTimes.reduce((s, v) => s + v, 0) / frameTimes.length;
     const max = Math.max(...frameTimes);
-    const sections = [...sectionTotals.entries()]
-      .map(([name, total]) => `${name}=${(total / frameTimes.length).toFixed(1)}ms`)
-      .join(" ");
-    console.log(
-      `[graph-perf] frames=20 avg=${avg.toFixed(1)}ms max=${max.toFixed(1)}ms ${sections}`,
-    );
+    console.log(`[graph-perf] frames=20 avg=${avg.toFixed(1)}ms max=${max.toFixed(1)}ms`);
     frameTimes = [];
-    sectionTotals.clear();
   }
-}
-function recordSection(name: string, ms: number) {
-  sectionTotals.set(name, (sectionTotals.get(name) ?? 0) + ms);
 }
 
 export function drawNetwork(
@@ -392,8 +316,6 @@ export function drawNetwork(
   state: RenderState,
 ) {
   const frameStart = import.meta.env.DEV ? performance.now() : 0;
-  spriteBudget = SPRITE_BUDGET_PER_FRAME;
-  spriteBudgetExhausted = false;
   const dpr = window.devicePixelRatio || 1;
   const width = sizeWidth / dpr;
   const height = sizeHeight / dpr;
@@ -407,8 +329,6 @@ export function drawNetwork(
   const { layout } = state;
   const scale = transform.scale;
   const dotsOnly = scale < DOTS_ONLY_SCALE;
-  // 解析度桶依「css 縮放 × dpr」選,螢幕上的實際像素密度才是準
-  const bucket = spriteBucketFor(scale * dpr);
 
   // ── 視野裁剪:世界座標下的可見範圍 ──
   const viewMinX = -transform.x / scale - CULL_MARGIN;
@@ -458,7 +378,6 @@ export function drawNetwork(
     return alpha;
   };
 
-  const edgeStart = import.meta.env.DEV ? performance.now() : 0;
   ctx.strokeStyle = EDGE_COLOR;
   const canBatchEdges = typeof Path2D !== "undefined";
   const edgeGroups = canBatchEdges
@@ -515,10 +434,8 @@ export function drawNetwork(
     }
   }
   ctx.globalAlpha = 1;
-  if (import.meta.env.DEV) recordSection("edges", performance.now() - edgeStart);
 
   // ── 節點 ──
-  const nodeStart = import.meta.env.DEV ? performance.now() : 0;
   layout.nodes.forEach((node, i) => {
     if (!visible[i]) return;
     const { color, glow, dim } = nodeVisual(node, state);
@@ -540,19 +457,7 @@ export function drawNetwork(
       if (!img) state.requestImage?.(node.node.thumbnail);
     }
 
-    // 光暈(依狀態色共用 sprite)
-    const glowSprite = getGlowSprite(glow, bucket);
-    if (glowSprite) {
-      ctx.drawImage(
-        glowSprite,
-        node.x - SPRITE_HALF,
-        node.y - SPRITE_HALF,
-        SPRITE_HALF * 2,
-        SPRITE_HALF * 2,
-      );
-    }
-
-    const sprite = getNodeSprite(node, img, bucket);
+    const sprite = getNodeSprite(node, color, glow, img);
     if (sprite) {
       ctx.drawImage(
         sprite,
@@ -562,7 +467,7 @@ export function drawNetwork(
         SPRITE_HALF * 2,
       );
     } else {
-      // sprite 尚未生成(限額中)或測試環境:直接繪製簡化版
+      // 無法建立 sprite(測試環境等):直接繪製
       const r = HEX_RADIUS;
       hexPath(ctx, node.x, node.y, r - 2);
       ctx.fillStyle = BG_CENTER;
@@ -572,29 +477,27 @@ export function drawNetwork(
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
       ctx.fillText(channelInitial(node.node), node.x, node.y + 1);
+      hexPath(ctx, node.x, node.y, r);
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 2;
+      ctx.stroke();
     }
 
-    // 狀態色邊框(每幀直接畫,變色不需重生 sprite)
-    hexPath(ctx, node.x, node.y, HEX_RADIUS);
-    ctx.strokeStyle = color;
-    ctx.lineWidth = hovered ? 3 : 2;
-    ctx.stroke();
+    // hover 強調:外圈加粗邊框(單一節點,成本可忽略)
+    if (hovered) {
+      hexPath(ctx, node.x, node.y, HEX_RADIUS + 2);
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 3;
+      ctx.stroke();
+    }
   });
   ctx.globalAlpha = 1;
-  if (import.meta.env.DEV) recordSection("nodes", performance.now() - nodeStart);
 
   // ── 標籤(固定在節點下方置中;layout 已保證互不重疊)──
-  const labelStart = import.meta.env.DEV ? performance.now() : 0;
   if (!dotsOnly) {
-    drawLabels(ctx, scale, state, visible, bucket);
+    drawLabels(ctx, scale, state, visible);
   }
-  if (import.meta.env.DEV) recordSection("labels", performance.now() - labelStart);
   ctx.restore();
-
-  // sprite 沒生完:下一幀接著補
-  if (spriteBudgetExhausted) {
-    state.requestRepaint?.();
-  }
 
   if (import.meta.env.DEV) {
     recordFrameTime(performance.now() - frameStart);
@@ -606,7 +509,6 @@ function drawLabels(
   scale: number,
   state: RenderState,
   visible: Uint8Array,
-  bucket: number,
 ) {
   // scale >= FONT_MIN_SCALE 時螢幕字級恆定,更小時字跟著世界縮小(空間已按最壞情況保留)
   const fontSize = FONT_BASE / Math.max(scale, FONT_MIN_SCALE);
@@ -614,7 +516,6 @@ function drawLabels(
   const worstFont = FONT_BASE / FONT_MIN_SCALE;
   // sprite 以最壞情況字級渲染,依目前字級等比縮小
   const ratio = fontSize / worstFont;
-  const worstLineHeight = worstFont * LINE_HEIGHT_RATIO;
   let fontSet = false;
 
   state.layout.nodes.forEach((node, i) => {
@@ -623,13 +524,11 @@ function drawLabels(
     const { dim } = nodeVisual(node, state);
     const startY = node.y + HEX_RADIUS + fontSize * LABEL_GAP_RATIO;
 
-    const sprite = getLabelSprite(node, bucket);
+    const sprite = getLabelSprite(node);
     if (sprite) {
       ctx.globalAlpha = dim && !hovered ? 0.4 : 1;
-      // 目的尺寸由節點度量推導(sprite 可能是其他解析度桶的替代品,不能除 sprite 尺寸)
-      const destW = (node.labelHalfWidth * 2 + LABEL_SPRITE_PAD * 2) * ratio;
-      const destH =
-        (node.labelLines.length * worstLineHeight + LABEL_SPRITE_PAD * 2) * ratio;
+      const destW = (sprite.width / LABEL_SPRITE_SCALE) * ratio;
+      const destH = (sprite.height / LABEL_SPRITE_SCALE) * ratio;
       ctx.drawImage(
         sprite,
         node.x - destW / 2,

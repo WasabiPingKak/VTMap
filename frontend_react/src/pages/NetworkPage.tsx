@@ -3,7 +3,7 @@
  * 所有 UI 都是懸浮在圖上的元件,唯一的離開路徑是左上角「回 VTMap」按鈕。
  */
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { FaClipboardList, FaInfoCircle } from "react-icons/fa";
 import { ArrowLeft } from "lucide-react";
@@ -13,14 +13,12 @@ import NetworkToolbar from "@/components/network/NetworkToolbar";
 import NetworkLegend from "@/components/network/NetworkLegend";
 import { useNetworkGraph } from "@/hooks/useNetworkGraph";
 import { useMyChannelId } from "@/hooks/useMyChannelId";
-import { useLiveRedirectData } from "@/hooks/useLiveRedirectData";
 
 const PANEL_INSET = 340;
 
 export default function NetworkPage() {
   const { data, isLoading, isError } = useNetworkGraph();
-  const { data: me, isLoading: meLoading } = useMyChannelId();
-  const liveQuery = useLiveRedirectData();
+  const { data: me } = useMyChannelId();
   const [searchParams, setSearchParams] = useSearchParams();
   const graphRef = useRef<NetworkGraphHandle | null>(null);
   const [showInfo, setShowInfo] = useState(false);
@@ -59,38 +57,6 @@ export default function NetworkPage() {
   );
 
   const centerNode = centerId ? data?.nodes.find((n) => n.channel_id === centerId) : null;
-
-  // 初始節點:進頁時網址沒帶 focus/center 就自動選一個,訪客一進來就有定位好的視角。
-  // 優先序:自己的頻道(已登入且在圖上)> 正在直播且在圖上的頻道隨機 > 圖上隨機
-  const autoFocused = useRef(false);
-  useEffect(() => {
-    if (autoFocused.current || !data?.nodes.length) return;
-    if (searchParams.get("focus") || searchParams.get("center")) {
-      autoFocused.current = true;
-      return;
-    }
-    // 等登入狀態與直播清單就緒(失敗也算就緒,走後備選項)
-    if (meLoading || liveQuery.isLoading) return;
-    autoFocused.current = true;
-
-    const inGraph = new Set(data.nodes.map((n) => n.channel_id));
-    let target: string | null = null;
-    if (me?.channelId && inGraph.has(me.channelId)) {
-      target = me.channelId;
-    }
-    if (!target) {
-      const liveInGraph = (liveQuery.data?.live ?? [])
-        .map((channel) => channel.channel_id)
-        .filter((id) => inGraph.has(id));
-      if (liveInGraph.length) {
-        target = liveInGraph[Math.floor(Math.random() * liveInGraph.length)];
-      }
-    }
-    if (!target) {
-      target = data.nodes[Math.floor(Math.random() * data.nodes.length)].channel_id;
-    }
-    setFocus(target);
-  }, [data, me, meLoading, liveQuery.isLoading, liveQuery.data, searchParams, setFocus]);
 
   // 定位:圓心 > 選取節點 > 自己的頻道(已登入且在圖上)> 顯示全圖
   const handleLocate = useCallback(() => {
