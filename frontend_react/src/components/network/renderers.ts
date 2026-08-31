@@ -408,7 +408,15 @@ function drawBackground(
   const cy = height / 2 + transform.y * 0.3;
   const sprite = getStarFieldSprite(stars);
   if (sprite) {
-    ctx.drawImage(sprite.canvas, cx - sprite.originX, cy - sprite.originY);
+    // 星空 sprite 完全在畫面外時跳 drawImage(遠距 pan 時省下 huge blit)
+    const dx = cx - sprite.originX;
+    const dy = cy - sprite.originY;
+    const outOfView =
+      dx + sprite.canvas.width < 0 ||
+      dx > width ||
+      dy + sprite.canvas.height < 0 ||
+      dy > height;
+    if (!outOfView) ctx.drawImage(sprite.canvas, dx, dy);
   } else {
     // fallback(測試環境等):逐一畫
     ctx.save();
@@ -586,63 +594,45 @@ export function drawNetwork(
     ? new Map<string, { alpha: number; width: number; path: Path2D }>()
     : null;
 
-  // 邊視為「螢幕上一個點」的世界長度門檻:低於此長度直接跳過(dense hub 遠景省下大量繪製)
-  const edgeMinWorldLen = EDGE_MIN_SCREEN_LEN / scale;
-  const edgeMinWorldLenSq = edgeMinWorldLen * edgeMinWorldLen;
-  // ego 模式:兩端都在外圍的邊 alpha=0.05 幾乎不可見,dense 圖多數屬於此類,整批跳過
-  const rings = layout.rings;
+  // 邊視為「螢幕上一個點」的世界長度平方門檻:低於此值直接跳過
+  const edgeMinWorldLenSq = (EDGE_MIN_SCREEN_LEN / scale) ** 2;
+  const layoutEdges = layout.edges;
+  const edgeCount = layoutEdges.length;
 
-  for (const { edge, source, target } of layout.edges) {
+  for (let ei = 0; ei < edgeCount; ei++) {
+    const le = layoutEdges[ei];
     // ego 模式外圍-外圍邊直接跳過(視覺雜訊,佔絕大多數)
+    if (le.egoDim === 2) continue;
+    // 線段 AABB 不與視野相交 → 跳過(AABB 已預算)
     if (
-      rings &&
-      rings.get(edge.a) === EGO_OUTER_RING &&
-      rings.get(edge.b) === EGO_OUTER_RING
+      le.boxMaxX < viewMinX ||
+      le.boxMinX > viewMaxX ||
+      le.boxMaxY < viewMinY ||
+      le.boxMinY > viewMaxY
     ) {
       continue;
     }
+    // 邊在畫面上小於 EDGE_MIN_SCREEN_LEN 像素 → 跳過
+    if (le.lenSq < edgeMinWorldLenSq) continue;
 
-    // 線段外接框不與視野相交 → 跳過
-    if (
-      Math.max(source.x, target.x) < viewMinX ||
-      Math.min(source.x, target.x) > viewMaxX ||
-      Math.max(source.y, target.y) < viewMinY ||
-      Math.min(source.y, target.y) > viewMaxY
-    ) {
-      continue;
-    }
-
-    const dx = target.x - source.x;
-    const dy = target.y - source.y;
-    const lenSq = dx * dx + dy * dy;
-    // 邊在畫面上小於 EDGE_MIN_SCREEN_LEN 像素 → 跳過(視覺上就是一個點,繪製浪費)
-    if (lenSq < edgeMinWorldLenSq) continue;
-
-    const alpha = edgeAlpha(edge.a, edge.b);
-    const width = Math.min(1 + edge.evidence_count * 0.6, 5);
-
-    const length = Math.sqrt(lenSq);
-    const bow = Math.min(length * 0.1, 36);
-    const controlX = (source.x + target.x) / 2 - (dy / length) * bow;
-    const controlY = (source.y + target.y) / 2 + (dx / length) * bow;
+    const alpha = edgeAlpha(le.edge.a, le.edge.b);
 
     if (edgeGroups) {
-      const widthBucket = Math.round(width * 2) / 2;
-      const key = `${alpha}|${widthBucket}`;
+      const key = `${alpha}|${le.widthBucket}`;
       let group = edgeGroups.get(key);
       if (!group) {
-        group = { alpha, width: widthBucket, path: new Path2D() };
+        group = { alpha, width: le.widthBucket, path: new Path2D() };
         edgeGroups.set(key, group);
       }
-      group.path.moveTo(source.x, source.y);
-      group.path.quadraticCurveTo(controlX, controlY, target.x, target.y);
+      group.path.moveTo(le.source.x, le.source.y);
+      group.path.quadraticCurveTo(le.controlX, le.controlY, le.target.x, le.target.y);
     } else {
       // fallback(測試環境等):逐邊繪製
       ctx.globalAlpha = alpha;
-      ctx.lineWidth = width / scale;
+      ctx.lineWidth = le.widthBucket / scale;
       ctx.beginPath();
-      ctx.moveTo(source.x, source.y);
-      ctx.quadraticCurveTo(controlX, controlY, target.x, target.y);
+      ctx.moveTo(le.source.x, le.source.y);
+      ctx.quadraticCurveTo(le.controlX, le.controlY, le.target.x, le.target.y);
       ctx.stroke();
     }
   }
