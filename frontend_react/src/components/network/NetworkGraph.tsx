@@ -13,7 +13,14 @@ import {
 } from "react";
 import GraphCanvas, { type GraphCanvasHandle, type CanvasTransform } from "./GraphCanvas";
 import { computeLayout } from "./layout";
-import { createStarField, drawNetwork, hitTest, type RenderState } from "./renderers";
+import {
+  bakeDimLayer,
+  createStarField,
+  drawNetwork,
+  hitTest,
+  type BakedDimLayer,
+  type RenderState,
+} from "./renderers";
 import { useImageCache } from "./useImageCache";
 import type { GraphLayout, NetworkGraphData } from "@/types/network";
 
@@ -68,6 +75,24 @@ const NetworkGraph = forwardRef<NetworkGraphHandle, NetworkGraphProps>(function 
     useCallback(() => canvasRef.current?.requestRender(), []),
   );
 
+  // ego 模式 dim 節點層的預烘:layout 完成後立刻 bake 一次(用當下 cached 圖片),
+  // 3 秒後 re-bake 一次讓 lazy-loaded 頭像進到 baked layer 裡。
+  // 之後 per-frame 只需 1 次 drawImage 覆蓋所有 dim 節點,取代數百次 sprite drawImage。
+  const [bakedDimLayer, setBakedDimLayer] = useState<BakedDimLayer | null>(null);
+  useEffect(() => {
+    if (!layout) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setBakedDimLayer(null);
+      return;
+    }
+    setBakedDimLayer(bakeDimLayer(layout, imagesRef.current));
+    const timer = setTimeout(() => {
+      setBakedDimLayer(bakeDimLayer(layout, imagesRef.current));
+      canvasRef.current?.requestRender();
+    }, 3000);
+    return () => clearTimeout(timer);
+  }, [layout, imagesRef]);
+
   const focusedIdRef = useRef(focusedId);
   useEffect(() => {
     focusedIdRef.current = focusedId;
@@ -108,10 +133,11 @@ const NetworkGraph = forwardRef<NetworkGraphHandle, NetworkGraphProps>(function 
         starField,
         requestImage,
         requestRepaint: () => canvasRef.current?.requestRender(),
+        bakedDimLayer,
       };
       drawNetwork(ctx, transform, size.width, size.height, state);
     },
-    [layout, hopDistances, starField, imagesRef, requestImage],
+    [layout, hopDistances, starField, imagesRef, requestImage, bakedDimLayer],
   );
 
   const onHover = useCallback(

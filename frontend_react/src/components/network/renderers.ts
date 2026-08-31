@@ -55,6 +55,19 @@ const HALO_RADIUS = 110;
 /** 視野裁剪的寬容邊距(world px,涵蓋暈染與標籤外溢) */
 const CULL_MARGIN = 160;
 
+/** dim 節點層的預烘 offscreen canvas(ego 模式用):
+ *  - canvas 涵蓋所有 dim 節點的 AABB,以 pxPerWorld 解析度
+ *  - 每幀單一 drawImage 取代 per-dim-node 的 sprite drawImage(數百次省成一次) */
+export interface BakedDimLayer {
+  canvas: HTMLCanvasElement;
+  /** canvas 左上對應的世界座標(minX, minY) */
+  worldX: number;
+  worldY: number;
+  /** 世界寬高(=canvas.width / pxPerWorld) */
+  worldW: number;
+  worldH: number;
+}
+
 export interface RenderState {
   layout: GraphLayout;
   images: Map<string, HTMLImageElement>;
@@ -69,6 +82,8 @@ export interface RenderState {
   requestImage?: (url: string) => void;
   /** sprite 生成限額用盡時要求下一幀重繪(漸進補齊) */
   requestRepaint?: () => void;
+  /** dim 節點層預烘結果;有值時節點迴圈跳過 dim 節點的 sprite drawImage,改成整層 blit */
+  bakedDimLayer?: BakedDimLayer | null;
 }
 
 export function createStarField(count = 260, spread = 2600) {
@@ -234,6 +249,95 @@ function getNodeSprite(
   const canvas = spriteCtx.canvas;
   nodeSpriteCache.set(key, canvas);
   return canvas;
+}
+
+/** 把一個節點的「六角底 + 頭像或首字」畫到目標 ctx 的目前原點,不含 outline/glow */
+function drawNodeShape(
+  ctx: CanvasRenderingContext2D,
+  node: LayoutNode,
+  img: HTMLImageElement | undefined,
+) {
+  const r = HEX_RADIUS;
+  hexPath(ctx, 0, 0, r - 2);
+  ctx.fillStyle = BG_CENTER;
+  ctx.fill();
+  if (img) {
+    ctx.save();
+    hexPath(ctx, 0, 0, r - 2);
+    ctx.clip();
+    ctx.drawImage(img, -r, -r, r * 2, r * 2);
+    ctx.restore();
+  } else {
+    hexPath(ctx, 0, 0, r - 2);
+    ctx.fillStyle = "rgba(255,255,255,0.06)";
+    ctx.fill();
+    ctx.fillStyle = LABEL_COLOR;
+    ctx.font = `${r * 0.9}px sans-serif`;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(channelInitial(node.node), 0, 1);
+  }
+}
+
+/** 每邊最大 offscreen canvas 尺寸(GPU / 記憶體上限考量;超過 fallback 走 per-frame) */
+const DIM_LAYER_MAX_PX = 4096;
+/** dim 層 bake 的解析度(每世界單位對應多少 canvas 像素) */
+const DIM_LAYER_PX_PER_WORLD = 1;
+
+/**
+ * 把 ego 模式下所有 dim(EGO_OUTER_RING)節點的 sprite 烘進單一 offscreen canvas。
+ * 每幀渲染時 drawImage 一次覆蓋所有 dim 節點,取代 per-node sprite drawImage(數百次省成一次)。
+ * 頭像有 cached 就用,否則畫 initial。超過尺寸上限則回傳 null,走 per-frame fallback。
+ */
+export function bakeDimLayer(
+  layout: GraphLayout,
+  images: Map<string, HTMLImageElement>,
+): BakedDimLayer | null {
+  if (typeof document === "undefined") return null;
+  const rings = layout.rings;
+  if (!rings) return null;
+
+  // 收集 dim 節點與其 AABB
+  const dimNodes: LayoutNode[] = [];
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const n of layout.nodes) {
+    if (rings.get(n.node.channel_id) !== EGO_OUTER_RING) continue;
+    dimNodes.push(n);
+    if (n.x - HEX_RADIUS < minX) minX = n.x - HEX_RADIUS;
+    if (n.y - HEX_RADIUS < minY) minY = n.y - HEX_RADIUS;
+    if (n.x + HEX_RADIUS > maxX) maxX = n.x + HEX_RADIUS;
+    if (n.y + HEX_RADIUS > maxY) maxY = n.y + HEX_RADIUS;
+  }
+  if (!dimNodes.length) return null;
+
+  const pad = 2;
+  const worldW = maxX - minX + pad * 2;
+  const worldH = maxY - minY + pad * 2;
+  const canvasW = Math.ceil(worldW * DIM_LAYER_PX_PER_WORLD);
+  const canvasH = Math.ceil(worldH * DIM_LAYER_PX_PER_WORLD);
+  if (canvasW > DIM_LAYER_MAX_PX || canvasH > DIM_LAYER_MAX_PX) return null;
+
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(canvasW, 1);
+  canvas.height = Math.max(canvasH, 1);
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return null;
+
+  ctx.scale(DIM_LAYER_PX_PER_WORLD, DIM_LAYER_PX_PER_WORLD);
+  const originX = -minX + pad;
+  const originY = -minY + pad;
+  for (const n of dimNodes) {
+    ctx.save();
+    ctx.translate(originX + n.x, originY + n.y);
+    const img = n.node.thumbnail ? images.get(n.node.thumbnail) : undefined;
+    drawNodeShape(ctx, n, img);
+    ctx.restore();
+  }
+
+  return { canvas, worldX: minX - pad, worldY: minY - pad, worldW, worldH };
 }
 
 /** 標籤 sprite:每個節點的多行標籤渲染一次(最壞情況字級 × 2 倍解析度),之後縮放 blit */
@@ -659,6 +763,15 @@ export function drawNetwork(
   }
   ctx.globalAlpha = 1;
 
+  // ── dim 節點層(ego 模式):預烘的整層 offscreen canvas 一次 blit 覆蓋所有 dim 節點的 sprite ──
+  const bakedDim = state.bakedDimLayer;
+  const useBakedDim = !!bakedDim && !dotsOnly;
+  if (useBakedDim && bakedDim) {
+    ctx.globalAlpha = NODE_DIM_ALPHA;
+    ctx.drawImage(bakedDim.canvas, bakedDim.worldX, bakedDim.worldY, bakedDim.worldW, bakedDim.worldH);
+    ctx.globalAlpha = 1;
+  }
+
   // ── 節點 ──
   // 外框依 (color, width, alpha) 分桶,收成 Path2D 於節點迴圈後一次 stroke(千節點省下大量 GPU submit)
   const strokeGroups = canBatchEdges
@@ -703,6 +816,27 @@ export function drawNetwork(
           SPRITE_HALF * 2,
         );
       }
+    }
+
+    // dim 節點的 sprite 已在上面預烘層一次畫完,per-node 這裡跳過(節省數百次 drawImage)
+    // outline 仍走 strokeGroups(顏色可能隨 focus 變),hovered 例外要重畫(hovered 邊界較粗需要蓋在 baked 上)
+    if (useBakedDim && isDim && !hovered) {
+      const strokeWidth = 2;
+      if (strokeGroups) {
+        const key = `${color}|${strokeWidth}|${nodeAlpha}`;
+        let group = strokeGroups.get(key);
+        if (!group) {
+          group = { color, width: strokeWidth, alpha: nodeAlpha, path: new Path2D() };
+          strokeGroups.set(key, group);
+        }
+        addHexToPath(group.path, node.x, node.y, HEX_RADIUS);
+      } else {
+        hexPath(ctx, node.x, node.y, HEX_RADIUS);
+        ctx.strokeStyle = color;
+        ctx.lineWidth = strokeWidth;
+        ctx.stroke();
+      }
+      continue;
     }
 
     const sprite = getNodeSprite(node, img, bucket);
