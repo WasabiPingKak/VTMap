@@ -45,6 +45,20 @@ export interface LayoutEdge {
   edge: NetworkEdge;
   source: LayoutNode;
   target: LayoutNode;
+  /** 預算的貝茲控制點(source/target 固定後不變) */
+  controlX: number;
+  controlY: number;
+  /** 邊長度平方,配合縮放做「螢幕長度 &lt; N px」裁剪 */
+  lenSq: number;
+  /** AABB,配合視野裁剪 */
+  boxMinX: number;
+  boxMinY: number;
+  boxMaxX: number;
+  boxMaxY: number;
+  /** 線寬桶(依 evidence_count 預算,配合 stroke groups key 用) */
+  widthBucket: number;
+  /** ego 模式端點淡化狀態:0=兩端都亮、1=一端在外圍、2=兩端都在外圍(直接跳過) */
+  egoDim: 0 | 1 | 2;
 }
 
 /** 空間網格:hitTest 用,把節點依座標分桶,查詢時只掃 3×3 個桶 */

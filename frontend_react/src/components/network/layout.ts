@@ -361,7 +361,41 @@ export function computeLayout(
     const source = byId.get(edge.a);
     const target = byId.get(edge.b);
     if (!source || !target) continue;
-    edges.push({ edge, source, target });
+
+    // 預算幾何(source/target 固定 = 每幀重算純浪費)
+    const dx = target.x - source.x;
+    const dy = target.y - source.y;
+    const lenSq = dx * dx + dy * dy;
+    const length = Math.sqrt(lenSq) || 1;
+    const bow = Math.min(length * 0.1, 36);
+    const controlX = (source.x + target.x) / 2 - (dy / length) * bow;
+    const controlY = (source.y + target.y) / 2 + (dx / length) * bow;
+
+    const width = Math.min(1 + edge.evidence_count * 0.6, 5);
+    const widthBucket = Math.round(width * 2) / 2;
+
+    // ego 淡化狀態:兩端都在外圍 → 2(渲染時直接跳過);一端在外圍 → 1;兩端都亮 → 0
+    let egoDim: 0 | 1 | 2 = 0;
+    if (rings) {
+      const outerA = rings.get(edge.a) === EGO_OUTER_RING ? 1 : 0;
+      const outerB = rings.get(edge.b) === EGO_OUTER_RING ? 1 : 0;
+      egoDim = (outerA + outerB) as 0 | 1 | 2;
+    }
+
+    edges.push({
+      edge,
+      source,
+      target,
+      controlX,
+      controlY,
+      lenSq,
+      boxMinX: Math.min(source.x, target.x),
+      boxMinY: Math.min(source.y, target.y),
+      boxMaxX: Math.max(source.x, target.x),
+      boxMaxY: Math.max(source.y, target.y),
+      widthBucket,
+      egoDim,
+    });
     if (!neighbors.has(edge.a)) neighbors.set(edge.a, new Set());
     if (!neighbors.has(edge.b)) neighbors.set(edge.b, new Set());
     neighbors.get(edge.a)!.add(edge.b);
