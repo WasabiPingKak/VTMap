@@ -49,17 +49,6 @@ interface GraphCanvasProps {
   maxZoom?: number;
 }
 
-export interface FitOptions {
-  /**
-   * 縮放下限:範圍太大、算出來的縮放比這個還小時,不再繼續縮小,
-   * 改用這個縮放並以 focusX/focusY 為中心(沒給就用範圍中心)。
-   * 用途:框選的兩點可能離得很遠,硬要全部入鏡會縮到什麼都看不清。
-   */
-  minScale?: number;
-  focusX?: number;
-  focusY?: number;
-}
-
 export interface GraphCanvasHandle {
   requestRender: () => void;
   getTransform: () => CanvasTransform;
@@ -73,10 +62,7 @@ export interface GraphCanvasHandle {
     maxY: number,
     padding?: number,
     rightInset?: number,
-    options?: FitOptions,
   ) => void;
-  /** 確保縮放下限容得下指定範圍(不移動相機);layout 更新時呼叫 */
-  ensureBoundsZoomable: (minX: number, minY: number, maxX: number, maxY: number) => void;
 }
 
 const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(function GraphCanvas(
@@ -268,7 +254,7 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(function Gra
           );
       },
 
-      fitBounds(minX, minY, maxX, maxY, padding = 80, rightInset = 0, options) {
+      fitBounds(minX, minY, maxX, maxY, padding = 80, rightInset = 0) {
         const canvas = canvasRef.current;
         if (!canvas || !zoomRef.current) return;
         const dpr = window.devicePixelRatio || 1;
@@ -286,13 +272,10 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(function Gra
           zoomRef.current.scaleExtent([dynamicMinZoomRef.current, maxZoom]);
         }
 
-        // 範圍太大就不硬塞:守住可讀的縮放,改以焦點為中心
-        const clamped = options?.minScale !== undefined && targetScale < options.minScale;
-        const appliedScale = clamped ? options!.minScale! : targetScale;
-        const cx = clamped && options?.focusX !== undefined ? options.focusX : (minX + maxX) / 2;
-        const cy = clamped && options?.focusY !== undefined ? options.focusY : (minY + maxY) / 2;
-        const tx = availW / 2 - cx * appliedScale;
-        const ty = h / 2 - cy * appliedScale;
+        const cx = (minX + maxX) / 2;
+        const cy = (minY + maxY) / 2;
+        const tx = availW / 2 - cx * targetScale;
+        const ty = h / 2 - cy * targetScale;
 
         const sel = select(canvas);
         sel.interrupt();
@@ -303,22 +286,8 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(function Gra
             zoomRef.current.transform as unknown as Parameters<
               ReturnType<typeof sel.transition>["call"]
             >[0],
-            zoomIdentity.translate(tx, ty).scale(appliedScale),
+            zoomIdentity.translate(tx, ty).scale(targetScale),
           );
-      },
-
-      ensureBoundsZoomable(minX, minY, maxX, maxY) {
-        if (!zoomRef.current) return;
-        const dpr = window.devicePixelRatio || 1;
-        const w = sizeRef.current.width / dpr;
-        const h = sizeRef.current.height / dpr;
-        if (!w || !h) return;
-
-        const targetScale = Math.min(w / (maxX - minX + 160), h / (maxY - minY + 160), 1.5);
-        if (targetScale < dynamicMinZoomRef.current) {
-          dynamicMinZoomRef.current = targetScale * 0.5;
-          zoomRef.current.scaleExtent([dynamicMinZoomRef.current, maxZoom]);
-        }
       },
     }),
     [requestRender, maxZoom],

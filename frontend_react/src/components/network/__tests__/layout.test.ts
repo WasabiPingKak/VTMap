@@ -129,27 +129,18 @@ describe("computeLayout ego 模式", () => {
     expect(layout.rings?.get("UC_E")).toBe(EGO_OUTER_RING);
   });
 
-  it("ego 模式不重排世界:每個節點的座標與全圖模式完全一致", () => {
-    const plain = computeLayout(egoData);
-    const ego = computeLayout(egoData, undefined, { centerId: "UC_A" });
-    for (const id of ["UC_A", "UC_B", "UC_C", "UC_D", "UC_E"]) {
-      const a = plain.byId.get(`${id}`)!;
-      const b = ego.byId.get(`${id}`)!;
-      expect(b.x).toBeCloseTo(a.x, 6);
-      expect(b.y).toBeCloseTo(a.y, 6);
-    }
-  });
+  it("圓心固定在原點,環半徑由內而外遞增", () => {
+    const layout = computeLayout(egoData, undefined, { centerId: "UC_A" });
+    const center = layout.byId.get("UC_A")!;
+    expect(Math.abs(center.x)).toBeLessThan(1);
+    expect(Math.abs(center.y)).toBeLessThan(1);
 
-  it("換圓心不移動任何節點", () => {
-    const fromA = computeLayout(egoData, undefined, { centerId: "UC_A" });
-    const fromC = computeLayout(egoData, undefined, { centerId: "UC_C" });
-    for (const id of ["UC_A", "UC_B", "UC_C", "UC_D", "UC_E"]) {
-      expect(fromC.byId.get(id)!.x).toBeCloseTo(fromA.byId.get(id)!.x, 6);
-      expect(fromC.byId.get(id)!.y).toBeCloseTo(fromA.byId.get(id)!.y, 6);
-    }
-    // 分環仍隨圓心改變
-    expect(fromA.rings?.get("UC_C")).toBe(2);
-    expect(fromC.rings?.get("UC_C")).toBe(0);
+    const dist = (id: string) => {
+      const n = layout.byId.get(id)!;
+      return Math.hypot(n.x - center.x, n.y - center.y);
+    };
+    expect(dist("UC_B")).toBeLessThan(dist("UC_C"));
+    expect(dist("UC_C")).toBeLessThan(dist("UC_D"));
   });
 
   it("圓心不存在時退回一般全圖模式", () => {
