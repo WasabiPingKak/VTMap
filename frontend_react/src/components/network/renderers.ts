@@ -44,6 +44,8 @@ import {
 export { HEX_RADIUS } from "./labelMetrics";
 /** 縮放小於此值時節點退化為圓點、不畫標籤(LOD) */
 const DOTS_ONLY_SCALE = 0.25;
+/** 縮放小於此值時 glow 光暈幾乎不可見,跳過 drawImage 省一半節點繪製呼叫 */
+const GLOW_MIN_SCALE = 0.4;
 /** 社群暈染半徑(world px) */
 const HALO_RADIUS = 110;
 /** 視野裁剪的寬容邊距(world px,涵蓋暈染與標籤外溢) */
@@ -424,14 +426,65 @@ function isEgoOuter(state: RenderState, id: string): boolean {
   return state.layout.rings?.get(id) === EGO_OUTER_RING;
 }
 
-function nodeVisual(node: LayoutNode, state: RenderState) {
-  const id = node.node.channel_id;
-  const dim = isEgoOuter(state, id);
-  const distance = state.hopDistances?.get(id);
-  if (distance === 0) return { color: FOCUSED_COLOR, glow: FOCUSED_GLOW, dim: false };
-  if (distance === 1) return { color: NEIGHBOR_COLOR, glow: NEIGHBOR_GLOW, dim };
-  if (distance === 2) return { color: HOP2_COLOR, glow: HOP2_GLOW, dim };
-  return { color: FAR_COLOR, glow: FAR_GLOW, dim };
+/** 每幀節點視覺狀態預算表:visible + color/glow/dim 一次算完,節點迴圈與標籤迴圈共用 */
+interface FrameVisuals {
+  visible: Uint8Array;
+  colors: string[];
+  glows: string[];
+  /** 1 = 需要淡化(已扣掉 hovered/focused 例外),0 = 全亮 */
+  isDim: Uint8Array;
+  hoveredNode: LayoutNode | null;
+}
+
+function computeFrameVisuals(
+  state: RenderState,
+  viewMinX: number,
+  viewMaxX: number,
+  viewMinY: number,
+  viewMaxY: number,
+): FrameVisuals {
+  const nodes = state.layout.nodes;
+  const rings = state.layout.rings;
+  const hopDistances = state.hopDistances;
+  const hoveredNode = state.hoveredId ? (state.layout.byId.get(state.hoveredId) ?? null) : null;
+
+  const visible = new Uint8Array(nodes.length);
+  const colors = new Array<string>(nodes.length);
+  const glows = new Array<string>(nodes.length);
+  const isDim = new Uint8Array(nodes.length);
+
+  for (let i = 0; i < nodes.length; i++) {
+    const node = nodes[i];
+    const inView =
+      node.x > viewMinX && node.x < viewMaxX && node.y > viewMinY && node.y < viewMaxY;
+    if (!inView) continue;
+    visible[i] = 1;
+
+    const id = node.node.channel_id;
+    const distance = hopDistances?.get(id);
+    let color: string;
+    let glow: string;
+    let dim = rings?.get(id) === EGO_OUTER_RING;
+    if (distance === 0) {
+      color = FOCUSED_COLOR;
+      glow = FOCUSED_GLOW;
+      dim = false;
+    } else if (distance === 1) {
+      color = NEIGHBOR_COLOR;
+      glow = NEIGHBOR_GLOW;
+    } else if (distance === 2) {
+      color = HOP2_COLOR;
+      glow = HOP2_GLOW;
+    } else {
+      color = FAR_COLOR;
+      glow = FAR_GLOW;
+    }
+    colors[i] = color;
+    glows[i] = glow;
+    isDim[i] = dim && node !== hoveredNode ? 1 : 0;
+  }
+
+  return { visible, colors, glows, isDim, hoveredNode };
 }
 
 // ── 開發模式的幀時間量測 ──
@@ -479,21 +532,22 @@ export function drawNetwork(
   const viewMaxX = (width - transform.x) / scale + CULL_MARGIN;
   const viewMaxY = (height - transform.y) / scale + CULL_MARGIN;
 
-  const visible = new Uint8Array(layout.nodes.length);
-  layout.nodes.forEach((node, i) => {
-    const inView =
-      node.x > viewMinX && node.x < viewMaxX && node.y > viewMinY && node.y < viewMaxY;
-    visible[i] = inView ? 1 : 0;
-  });
+  // 一次算完 visible + 節點視覺狀態(color/glow/isDim/hoveredNode),兩個繪製迴圈共用
+  const visuals = computeFrameVisuals(state, viewMinX, viewMaxX, viewMinY, viewMaxY);
+  const { visible, colors: nColors, glows: nGlows, isDim: nIsDim, hoveredNode } = visuals;
+  const nodes = layout.nodes;
+  const nodeCount = nodes.length;
 
   // ── 社群暈染(僅全圖模式;ego 模式的環狀結構自己說話)──
   if (!layout.rings && layout.communities) {
-    layout.nodes.forEach((node, i) => {
-      if (!visible[i]) return;
-      const community = layout.communities!.get(node.node.channel_id);
-      if (community === undefined) return;
+    const communities = layout.communities;
+    for (let i = 0; i < nodeCount; i++) {
+      if (!visible[i]) continue;
+      const node = nodes[i];
+      const community = communities.get(node.node.channel_id);
+      if (community === undefined) continue;
       const sprite = getHaloSprite(community);
-      if (!sprite) return;
+      if (!sprite) continue;
       ctx.drawImage(
         sprite,
         node.x - HALO_RADIUS,
@@ -501,7 +555,7 @@ export function drawNetwork(
         HALO_RADIUS * 2,
         HALO_RADIUS * 2,
       );
-    });
+    }
   }
 
   // ── 邊(輕微弧線;依透明度×線寬分組,聚合成少數路徑一次 stroke)──
@@ -583,12 +637,15 @@ export function drawNetwork(
   const strokeGroups = canBatchEdges
     ? new Map<string, { color: string; width: number; alpha: number; path: Path2D }>()
     : null;
+  const drawGlow = scale >= GLOW_MIN_SCALE;
 
-  layout.nodes.forEach((node, i) => {
-    if (!visible[i]) return;
-    const { color, glow, dim } = nodeVisual(node, state);
-    const hovered = state.hoveredId === node.node.channel_id;
-    const nodeAlpha = dim && !hovered ? NODE_DIM_ALPHA : 1;
+  for (let i = 0; i < nodeCount; i++) {
+    if (!visible[i]) continue;
+    const node = nodes[i];
+    const color = nColors[i];
+    const isDim = nIsDim[i];
+    const hovered = node === hoveredNode;
+    const nodeAlpha = isDim ? NODE_DIM_ALPHA : 1;
     ctx.globalAlpha = nodeAlpha;
 
     if (dotsOnly) {
@@ -596,7 +653,7 @@ export function drawNetwork(
       ctx.beginPath();
       ctx.arc(node.x, node.y, 6 / Math.max(scale, 0.08), 0, Math.PI * 2);
       ctx.fill();
-      return;
+      continue;
     }
 
     // 頭像延遲載入:實際可見才發請求
@@ -606,16 +663,18 @@ export function drawNetwork(
       if (!img) state.requestImage?.(node.node.thumbnail);
     }
 
-    // 光暈(依狀態光暈色共用 sprite,不依節點)
-    const glowSprite = getGlowSprite(glow, bucket);
-    if (glowSprite) {
-      ctx.drawImage(
-        glowSprite,
-        node.x - SPRITE_HALF,
-        node.y - SPRITE_HALF,
-        SPRITE_HALF * 2,
-        SPRITE_HALF * 2,
-      );
+    // 光暈(依狀態光暈色共用 sprite,不依節點);縮放太小時完全不畫
+    if (drawGlow) {
+      const glowSprite = getGlowSprite(nGlows[i], bucket);
+      if (glowSprite) {
+        ctx.drawImage(
+          glowSprite,
+          node.x - SPRITE_HALF,
+          node.y - SPRITE_HALF,
+          SPRITE_HALF * 2,
+          SPRITE_HALF * 2,
+        );
+      }
     }
 
     const sprite = getNodeSprite(node, img, bucket);
@@ -656,7 +715,7 @@ export function drawNetwork(
       ctx.lineWidth = strokeWidth;
       ctx.stroke();
     }
-  });
+  }
 
   if (strokeGroups) {
     for (const group of strokeGroups.values()) {
@@ -670,7 +729,7 @@ export function drawNetwork(
 
   // ── 標籤(固定在節點下方置中;layout 已保證互不重疊)──
   if (!dotsOnly) {
-    drawLabels(ctx, scale, state, visible, bucket);
+    drawLabels(ctx, scale, state, visuals, bucket);
   }
   ctx.restore();
 
@@ -688,7 +747,7 @@ function drawLabels(
   ctx: CanvasRenderingContext2D,
   scale: number,
   state: RenderState,
-  visible: Uint8Array,
+  visuals: FrameVisuals,
   bucket: number,
 ) {
   // scale >= FONT_MIN_SCALE 時螢幕字級恆定,更小時字跟著世界縮小(空間已按最壞情況保留)
@@ -700,15 +759,18 @@ function drawLabels(
   const ratio = fontSize / worstFont;
   let fontSet = false;
 
-  state.layout.nodes.forEach((node, i) => {
-    if (!visible[i]) return;
-    const hovered = state.hoveredId === node.node.channel_id;
-    const { dim } = nodeVisual(node, state);
+  const nodes = state.layout.nodes;
+  const { visible, isDim } = visuals;
+  const nodeCount = nodes.length;
+  for (let i = 0; i < nodeCount; i++) {
+    if (!visible[i]) continue;
+    const node = nodes[i];
+    const dim = isDim[i];
     const startY = node.y + HEX_RADIUS + fontSize * LABEL_GAP_RATIO;
 
     const sprite = getLabelSprite(node, bucket);
     if (sprite) {
-      ctx.globalAlpha = dim && !hovered ? 0.4 : 1;
+      ctx.globalAlpha = dim ? 0.4 : 1;
       // 目的尺寸由節點度量推導(sprite 可能是其他解析度桶的替代品,不能除 sprite 尺寸)
       const destW = (node.labelHalfWidth * 2 + LABEL_SPRITE_PAD * 2) * ratio;
       const destH =
@@ -720,7 +782,7 @@ function drawLabels(
         destW,
         destH,
       );
-      return;
+      continue;
     }
 
     // fallback(測試環境等):直接 fillText
@@ -730,11 +792,12 @@ function drawLabels(
       ctx.textBaseline = "top";
       fontSet = true;
     }
-    ctx.fillStyle = dim && !hovered ? LABEL_DIM : LABEL_COLOR;
-    node.labelLines.forEach((line, lineIndex) => {
-      ctx.fillText(line, node.x, startY + lineIndex * lineHeight);
-    });
-  });
+    ctx.fillStyle = dim ? LABEL_DIM : LABEL_COLOR;
+    const lines = node.labelLines;
+    for (let j = 0; j < lines.length; j++) {
+      ctx.fillText(lines[j], node.x, startY + j * lineHeight);
+    }
+  }
   ctx.globalAlpha = 1;
 }
 
