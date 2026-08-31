@@ -46,8 +46,12 @@ export { HEX_RADIUS } from "./labelMetrics";
 const DOTS_ONLY_SCALE = 0.25;
 /** 縮放小於此值時 glow 光暈幾乎不可見,跳過 drawImage 省一半節點繪製呼叫 */
 const GLOW_MIN_SCALE = 0.4;
+/** 縮放小於此值時社群 halo 相互重疊糊在一起,不畫可省下大量 overdraw */
+const HALO_MIN_SCALE = 0.35;
 /** 社群暈染半徑(world px) */
 const HALO_RADIUS = 110;
+/** 邊在畫面上的長度小於此像素數就跳過(dense hub 在低縮放時直接省下大量 quadraticCurveTo) */
+const EDGE_MIN_SCREEN_LEN = 2;
 /** 視野裁剪的寬容邊距(world px,涵蓋暈染與標籤外溢) */
 const CULL_MARGIN = 160;
 
@@ -539,7 +543,8 @@ export function drawNetwork(
   const nodeCount = nodes.length;
 
   // ── 社群暈染(僅全圖模式;ego 模式的環狀結構自己說話)──
-  if (!layout.rings && layout.communities) {
+  // 縮放太小時 halo 相互重疊只是一片色霧,直接跳過整段迴圈
+  if (!layout.rings && layout.communities && scale >= HALO_MIN_SCALE) {
     const communities = layout.communities;
     for (let i = 0; i < nodeCount; i++) {
       if (!visible[i]) continue;
@@ -581,6 +586,10 @@ export function drawNetwork(
     ? new Map<string, { alpha: number; width: number; path: Path2D }>()
     : null;
 
+  // 邊視為「螢幕上一個點」的世界長度門檻:低於此長度直接跳過(dense hub 遠景省下大量繪製)
+  const edgeMinWorldLen = EDGE_MIN_SCREEN_LEN / scale;
+  const edgeMinWorldLenSq = edgeMinWorldLen * edgeMinWorldLen;
+
   for (const { edge, source, target } of layout.edges) {
     // 線段外接框不與視野相交 → 跳過
     if (
@@ -592,12 +601,16 @@ export function drawNetwork(
       continue;
     }
 
+    const dx = target.x - source.x;
+    const dy = target.y - source.y;
+    const lenSq = dx * dx + dy * dy;
+    // 邊在畫面上小於 EDGE_MIN_SCREEN_LEN 像素 → 跳過(視覺上就是一個點,繪製浪費)
+    if (lenSq < edgeMinWorldLenSq) continue;
+
     const alpha = edgeAlpha(edge.a, edge.b);
     const width = Math.min(1 + edge.evidence_count * 0.6, 5);
 
-    const dx = target.x - source.x;
-    const dy = target.y - source.y;
-    const length = Math.hypot(dx, dy) || 1;
+    const length = Math.sqrt(lenSq);
     const bow = Math.min(length * 0.1, 36);
     const controlX = (source.x + target.x) / 2 - (dy / length) * bow;
     const controlY = (source.y + target.y) / 2 + (dx / length) * bow;
