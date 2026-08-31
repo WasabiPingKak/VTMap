@@ -189,12 +189,14 @@ function computeEgoPositions(
     sn.y = Math.sin(angle) * ringRadii[ring];
   }
 
+  // 軟 radial:圓心仍固定(視覺焦點),其他環的 radial 只當輕微引導,
+  // 拉強 link 讓有連線的節點聚成叢集,允許綠/藍節點依實際關係分群而非硬分環。
   const sim = forceSimulation(simNodes)
     .force(
       "link",
       forceLink(simLinks)
         .id((d) => (d as SimNode).id)
-        .strength(0.1),
+        .strength(0.4),
     )
     .force("charge", forceManyBody().strength(-220))
     .force(
@@ -207,7 +209,7 @@ function computeEgoPositions(
         (d) => ringRadii[rings.get((d as SimNode).id)!],
         0,
         0,
-      ).strength((d) => (rings.get((d as SimNode).id)! >= EGO_OUTER_RING ? 0.5 : 0.9)),
+      ).strength((d) => (rings.get((d as SimNode).id)! >= EGO_OUTER_RING ? 0.05 : 0.15)),
     )
     .stop();
 
