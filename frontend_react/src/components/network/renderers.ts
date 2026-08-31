@@ -121,9 +121,11 @@ function spriteBucketFor(effectiveScale: number): number {
   return bucket;
 }
 
-/** 每幀允許新建的 sprite 數,超額的下一幀補(消除大量新節點同時進場的尖峰) */
-const SPRITE_BUDGET_PER_FRAME = 64;
-let spriteBudget = SPRITE_BUDGET_PER_FRAME;
+/** 每幀允許新建的節點/標籤 sprite 數(獨立額度,避免節點吃光讓標籤退化 fallback) */
+const NODE_SPRITE_BUDGET_PER_FRAME = 48;
+const LABEL_SPRITE_BUDGET_PER_FRAME = 48;
+let nodeSpriteBudget = NODE_SPRITE_BUDGET_PER_FRAME;
+let labelSpriteBudget = LABEL_SPRITE_BUDGET_PER_FRAME;
 let spriteBudgetExhausted = false;
 const SPRITE_HALF = HEX_RADIUS + SPRITE_PAD;
 // 每節點的 sprite 變體:有/無頭像 × 3 解析度桶,乘上節點數 → 5000 有餘裕
@@ -179,7 +181,7 @@ function getNodeSprite(
   const cached = nodeSpriteCache.get(key);
   if (cached) return cached;
 
-  if (spriteBudget <= 0) {
+  if (nodeSpriteBudget <= 0) {
     spriteBudgetExhausted = true;
     // 其他解析度桶的現成 sprite 先頂著,下一幀再補正確的桶
     for (const b of SPRITE_BUCKETS) {
@@ -193,7 +195,7 @@ function getNodeSprite(
   const size = SPRITE_HALF * 2 * SPRITE_SCALE * bucket;
   const spriteCtx = createSpriteCanvas(size);
   if (!spriteCtx) return null;
-  spriteBudget -= 1;
+  nodeSpriteBudget -= 1;
 
   spriteCtx.scale(SPRITE_SCALE * bucket, SPRITE_SCALE * bucket);
   spriteCtx.translate(SPRITE_HALF, SPRITE_HALF);
@@ -238,7 +240,7 @@ function getLabelSprite(node: LayoutNode, bucket: number): HTMLCanvasElement | n
   const cached = labelSpriteCache.get(key);
   if (cached !== undefined) return cached;
 
-  if (spriteBudget <= 0) {
+  if (labelSpriteBudget <= 0) {
     spriteBudgetExhausted = true;
     for (const b of SPRITE_BUCKETS) {
       if (b === bucket) continue;
@@ -247,7 +249,7 @@ function getLabelSprite(node: LayoutNode, bucket: number): HTMLCanvasElement | n
     }
     return null;
   }
-  spriteBudget -= 1;
+  labelSpriteBudget -= 1;
 
   const renderScale = LABEL_SPRITE_SCALE * bucket;
   const worstFont = FONT_BASE / FONT_MIN_SCALE;
@@ -318,6 +320,56 @@ function getHaloSprite(community: number): HTMLCanvasElement | null {
 let bgGradientKey = "";
 let bgGradient: CanvasGradient | null = null;
 
+/** 星空 sprite:每個 star field 陣列只渲染一次,之後每幀整張 blit 到平移位置 */
+interface StarFieldSprite {
+  canvas: HTMLCanvasElement;
+  /** sprite 內對應世界座標 (0, 0) 的像素座標 */
+  originX: number;
+  originY: number;
+}
+const starFieldSpriteCache = new WeakMap<object, StarFieldSprite>();
+
+function getStarFieldSprite(stars: RenderState["starField"]): StarFieldSprite | null {
+  const cached = starFieldSpriteCache.get(stars);
+  if (cached) return cached;
+  if (typeof document === "undefined" || !stars.length) return null;
+
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const s of stars) {
+    if (s.x - s.r < minX) minX = s.x - s.r;
+    if (s.y - s.r < minY) minY = s.y - s.r;
+    if (s.x + s.r > maxX) maxX = s.x + s.r;
+    if (s.y + s.r > maxY) maxY = s.y + s.r;
+  }
+  const pad = 4;
+  const width = Math.ceil(maxX - minX) + pad * 2;
+  const height = Math.ceil(maxY - minY) + pad * 2;
+
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(width, 1);
+  canvas.height = Math.max(height, 1);
+  const spriteCtx = canvas.getContext("2d");
+  if (!spriteCtx) return null;
+
+  const originX = -minX + pad;
+  const originY = -minY + pad;
+  spriteCtx.translate(originX, originY);
+  spriteCtx.fillStyle = "#ffffff";
+  for (const s of stars) {
+    spriteCtx.globalAlpha = s.alpha;
+    spriteCtx.beginPath();
+    spriteCtx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
+    spriteCtx.fill();
+  }
+
+  const sprite: StarFieldSprite = { canvas, originX, originY };
+  starFieldSpriteCache.set(stars, sprite);
+  return sprite;
+}
+
 function drawBackground(
   ctx: CanvasRenderingContext2D,
   transform: CanvasTransform,
@@ -346,17 +398,25 @@ function drawBackground(
   ctx.fillRect(0, 0, width, height);
 
   // 星空以低速跟隨平移(視差感),不隨縮放改變大小
-  ctx.save();
-  ctx.translate(width / 2 + transform.x * 0.3, height / 2 + transform.y * 0.3);
-  ctx.fillStyle = "#ffffff";
-  for (const s of stars) {
-    ctx.globalAlpha = s.alpha;
-    ctx.beginPath();
-    ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
-    ctx.fill();
+  const cx = width / 2 + transform.x * 0.3;
+  const cy = height / 2 + transform.y * 0.3;
+  const sprite = getStarFieldSprite(stars);
+  if (sprite) {
+    ctx.drawImage(sprite.canvas, cx - sprite.originX, cy - sprite.originY);
+  } else {
+    // fallback(測試環境等):逐一畫
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.fillStyle = "#ffffff";
+    for (const s of stars) {
+      ctx.globalAlpha = s.alpha;
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+    ctx.globalAlpha = 1;
   }
-  ctx.restore();
-  ctx.globalAlpha = 1;
 }
 
 /** ego 模式下,節點是否屬於外圍(與圓心兩層內無關)而需淡化 */
@@ -394,7 +454,8 @@ export function drawNetwork(
   state: RenderState,
 ) {
   const frameStart = import.meta.env.DEV ? performance.now() : 0;
-  spriteBudget = SPRITE_BUDGET_PER_FRAME;
+  nodeSpriteBudget = NODE_SPRITE_BUDGET_PER_FRAME;
+  labelSpriteBudget = LABEL_SPRITE_BUDGET_PER_FRAME;
   spriteBudgetExhausted = false;
   const dpr = window.devicePixelRatio || 1;
   const width = sizeWidth / dpr;

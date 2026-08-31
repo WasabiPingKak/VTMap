@@ -2,6 +2,7 @@
  * 聚焦頻道的詳情側板:頻道資訊、關係清單與證據影片。
  */
 
+import { useMemo } from "react";
 import { Crosshair, X } from "lucide-react";
 import type { NetworkEdge, NetworkGraphData, NetworkNode } from "@/types/network";
 import { channelDisplayName, channelInitial } from "./displayName";
@@ -14,10 +15,6 @@ interface DetailPanelProps {
   onClose: () => void;
   onFocusChange: (channelId: string) => void;
   onSetCenter: (channelId: string | null) => void;
-}
-
-function findNode(data: NetworkGraphData, id: string): NetworkNode | undefined {
-  return data.nodes.find((n) => n.channel_id === id);
 }
 
 function formatDate(iso: string | null): string {
@@ -33,19 +30,30 @@ export default function DetailPanel({
   onFocusChange,
   onSetCenter,
 }: DetailPanelProps) {
-  const channel = findNode(data, focusedId);
+  // 建 channel_id → node 索引一次,避免每筆關係都對 data.nodes 掃全表
+  const nodeById = useMemo(() => {
+    const m = new Map<string, NetworkNode>();
+    for (const n of data.nodes) m.set(n.channel_id, n);
+    return m;
+  }, [data]);
+
+  // relations 只在 data / focusedId 變時重算(排序也一併記憶)
+  const relations = useMemo(() => {
+    const out: { other: NetworkNode; edge: NetworkEdge }[] = [];
+    for (const edge of data.edges) {
+      const otherId = edge.a === focusedId ? edge.b : edge.b === focusedId ? edge.a : null;
+      if (!otherId) continue;
+      const other = nodeById.get(otherId);
+      if (other) out.push({ other, edge });
+    }
+    out.sort((x, y) => y.edge.evidence_count - x.edge.evidence_count);
+    return out;
+  }, [data, focusedId, nodeById]);
+
+  const channel = nodeById.get(focusedId);
   if (!channel) return null;
 
   const isCenter = centerId === focusedId;
-
-  const relations: { other: NetworkNode; edge: NetworkEdge }[] = [];
-  for (const edge of data.edges) {
-    const otherId = edge.a === focusedId ? edge.b : edge.b === focusedId ? edge.a : null;
-    if (!otherId) continue;
-    const other = findNode(data, otherId);
-    if (other) relations.push({ other, edge });
-  }
-  relations.sort((x, y) => y.edge.evidence_count - x.edge.evidence_count);
 
   return (
     <aside className="absolute top-0 right-0 h-full w-full sm:w-[340px] bg-slate-950/90 backdrop-blur border-l border-slate-800 text-slate-100 flex flex-col z-10">
