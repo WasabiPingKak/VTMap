@@ -48,6 +48,10 @@ const DOTS_ONLY_SCALE = 0.25;
 const GLOW_MIN_SCALE = 0.4;
 /** 縮放小於此值時社群 halo 相互重疊糊在一起,不畫可省下大量 overdraw */
 const HALO_MIN_SCALE = 0.35;
+/** 縮放小於此值時 dim 節點的標籤本來就淡到看不清,跳過省下大量 label drawImage */
+const DIM_LABEL_MIN_SCALE = 1.0;
+/** 縮放小於此值時外圍邊糊成一片,不畫預烘 Path;高於此值時單一 stroke 恢復連線視覺 */
+const OUTER_EDGE_MIN_SCALE = 0.4;
 /** 社群暈染半徑(world px) */
 const HALO_RADIUS = 110;
 /** 邊在畫面上的長度小於此像素數就跳過(dense hub 在低縮放時直接省下大量 quadraticCurveTo) */
@@ -599,10 +603,11 @@ export function drawNetwork(
   const layoutEdges = layout.edges;
   const edgeCount = layoutEdges.length;
 
+  const hasBakedOuterEdges = layout.outerEdgePaths !== null;
   for (let ei = 0; ei < edgeCount; ei++) {
     const le = layoutEdges[ei];
-    // ego 模式外圍-外圍邊直接跳過(視覺雜訊,佔絕大多數)
-    if (le.egoDim === 2) continue;
+    // ego 模式:所有「至少一端在外圍」的邊都在預烘 Path2D 裡,frame 迴圈跳過
+    if (hasBakedOuterEdges && le.egoDim > 0) continue;
     // 線段 AABB 不與視野相交 → 跳過(AABB 已預算)
     if (
       le.boxMaxX < viewMinX ||
@@ -642,6 +647,16 @@ export function drawNetwork(
       ctx.globalAlpha = group.alpha;
       ctx.lineWidth = group.width / scale;
       ctx.stroke(group.path);
+    }
+  }
+
+  // 預烘的外圍邊(ego 模式;alpha 固定 EDGE_DIM_ALPHA):single stroke 一次畫完,
+  // 恢復外圍連線視覺卻不再 iterate 上萬條邊。低縮放時外圍邊糊成一片,跳過整批。
+  if (layout.outerEdgePaths && scale >= OUTER_EDGE_MIN_SCALE) {
+    ctx.globalAlpha = EDGE_DIM_ALPHA;
+    for (const [widthBucket, path] of layout.outerEdgePaths) {
+      ctx.lineWidth = widthBucket / scale;
+      ctx.stroke(path);
     }
   }
   ctx.globalAlpha = 1;
@@ -777,10 +792,13 @@ function drawLabels(
   const nodes = state.layout.nodes;
   const { visible, isDim } = visuals;
   const nodeCount = nodes.length;
+  // 中縮放時 dim 節點(ego 外圍等)本來 alpha 就 0.4 淡到糊,直接跳整批 label drawImage
+  const skipDimLabels = scale < DIM_LABEL_MIN_SCALE;
   for (let i = 0; i < nodeCount; i++) {
     if (!visible[i]) continue;
-    const node = nodes[i];
     const dim = isDim[i];
+    if (dim && skipDimLabels) continue;
+    const node = nodes[i];
     const startY = node.y + HEX_RADIUS + fontSize * LABEL_GAP_RATIO;
 
     const sprite = getLabelSprite(node, bucket);

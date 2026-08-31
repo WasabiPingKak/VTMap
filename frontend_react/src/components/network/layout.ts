@@ -423,6 +423,23 @@ export function computeLayout(
     );
   }
 
+  // ego 模式:把「至少一端在外圍」的邊(alpha 固定 0.05、幾何固定)預烘進 per-widthBucket Path2D,
+  // 渲染時單一 stroke 一次畫完,frame 迴圈就不用 iterate 這些邊(dense 圖大多屬此類)。
+  let outerEdgePaths: Map<number, Path2D> | null = null;
+  if (rings && typeof Path2D !== "undefined") {
+    outerEdgePaths = new Map<number, Path2D>();
+    for (const le of edges) {
+      if (le.egoDim === 0) continue;
+      let p = outerEdgePaths.get(le.widthBucket);
+      if (!p) {
+        p = new Path2D();
+        outerEdgePaths.set(le.widthBucket, p);
+      }
+      p.moveTo(le.source.x, le.source.y);
+      p.quadraticCurveTo(le.controlX, le.controlY, le.target.x, le.target.y);
+    }
+  }
+
   return {
     nodes,
     edges,
@@ -433,5 +450,6 @@ export function computeLayout(
     rings,
     communities,
     hitGrid: buildHitGrid(nodes),
+    outerEdgePaths,
   };
 }
