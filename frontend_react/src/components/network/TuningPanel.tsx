@@ -40,8 +40,9 @@ export default function TuningPanel({ tuning, onChange, onClose }: TuningPanelPr
   };
   const resetAll = () => onChange({ ...DEFAULT_TUNING });
 
+  // 貼在 NetworkToolbar 下方(top-16 + 工具列高度),同寬 w-60,避開 bottom-left 的 NetworkLegend
   return (
-    <div className="absolute top-3 right-3 z-20 w-[320px] rounded-lg bg-slate-950/95 backdrop-blur border border-slate-800 p-3 shadow-lg">
+    <div className="absolute top-40 left-3 z-20 w-60 max-h-[calc(100vh-320px)] overflow-y-auto rounded-lg bg-slate-950/95 backdrop-blur border border-slate-800 p-3 shadow-lg">
       <div className="mb-3 flex items-center justify-between">
         <div className="text-sm font-medium text-slate-100">Layout 微調</div>
         <button
