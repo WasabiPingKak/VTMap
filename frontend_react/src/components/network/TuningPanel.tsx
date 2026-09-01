@@ -30,10 +30,10 @@ const ROWS: ParamRow[] = [
   { key: "radialStrength", label: "環半徑錨定強度", min: 0.1, max: 2, step: 0.05, nudge: 0.01, hint: "越大越硬撐在環上" },
   { key: "collidePadding", label: "節點/標籤間距", min: 0, max: 50, step: 1, nudge: 1, hint: "px" },
   { key: "bandGap", label: "環間最小間距", min: 0, max: 200, step: 5, nudge: 1, hint: "px" },
-  { key: "hop1CapMultiplier", label: "hop1 半徑上限倍率", min: 0.5, max: 2, step: 0.05, nudge: 0.01, hint: "× ringRadii[1]" },
-  { key: "hop2CapMultiplier", label: "hop2 半徑上限倍率", min: 0.5, max: 2, step: 0.05, nudge: 0.01, hint: "× ringRadii[2]" },
-  { key: "hop3CapMultiplier", label: "hop3 半徑上限倍率", min: 0.5, max: 2, step: 0.05, nudge: 0.01, hint: "× ringRadii[3]" },
-  { key: "outerCapMultiplier", label: "外圍半徑上限倍率", min: 0.3, max: 2, step: 0.05, nudge: 0.01, hint: "× ringRadii[4],< 1 把灰點拉近" },
+  { key: "hop1CapMultiplier", label: "hop1 半徑上限倍率", min: 0.1, max: 2, step: 0.05, nudge: 0.01, hint: "× ringRadii[1]" },
+  { key: "hop2CapMultiplier", label: "hop2 半徑上限倍率", min: 0.1, max: 2, step: 0.05, nudge: 0.01, hint: "× ringRadii[2]" },
+  { key: "hop3CapMultiplier", label: "hop3 半徑上限倍率", min: 0.1, max: 2, step: 0.05, nudge: 0.01, hint: "× ringRadii[3]" },
+  { key: "outerCapMultiplier", label: "外圍半徑上限倍率", min: 0.1, max: 2, step: 0.05, nudge: 0.01, hint: "× ringRadii[4],< 1 把灰點拉近" },
 ];
 
 /** 依 step 大小決定小數位:step >= 1 顯示整數,< 1 顯示 2 位 */
