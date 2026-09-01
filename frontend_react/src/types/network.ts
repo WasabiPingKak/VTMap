@@ -33,6 +33,18 @@ export interface NetworkGraphData {
   edges: NetworkEdge[];
 }
 
+/** 「最新加入」面板用的頻道摘要:比 NetworkNode 少 in_vtmap、多一個 created_at */
+export interface RecentNode {
+  channel_id: string;
+  title: string | null;
+  handle: string | null;
+  thumbnail: string | null;
+  subscriber_count: number | null;
+  /** channels.created_at 的 ISO 字串;前端算相對時間 */
+  created_at: string | null;
+  scanned: boolean;
+}
+
 /** 力導向 layout 計算後的節點位置與標籤度量 */
 export interface LayoutNode {
   node: NetworkNode;
