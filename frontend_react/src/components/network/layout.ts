@@ -67,14 +67,14 @@ export interface LayoutTuning {
 }
 
 export const DEFAULT_TUNING: LayoutTuning = {
-  linkStrength: 0.05,
+  linkStrength: 0.04,
   chargeStrength: -220,
   radialStrength: 0.9,
   collidePadding: 12,
   bandGap: 60,
-  hop1CapMultiplier: 1,
-  hop2CapMultiplier: 1,
-  hop3CapMultiplier: 0.5,
+  hop1CapMultiplier: 0.75,
+  hop2CapMultiplier: 0.6,
+  hop3CapMultiplier: 0.6,
   outerCapMultiplier: 1,
 };
 
