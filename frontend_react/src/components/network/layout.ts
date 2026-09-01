@@ -214,15 +214,21 @@ function computeEgoPositions(
   const ticks = Math.ceil(Math.log(sim.alphaMin()) / Math.log(1 - sim.alphaDecay()));
   sim.tick(ticks);
 
-  // 硬性徑向分帶:sim 決定角度,再把 hop2/outer 沿原角度往外推,
-  // 確保 hop1(綠)半徑嚴格小於 hop2(藍)、hop2 嚴格小於 outer,不再交錯。
+  // 硬性徑向分帶:sim 決定角度,再依環別把 hop1 拉回上限、hop2/outer 推出下限,
+  // 確保 hop1(綠)緊貼圓心、半徑嚴格小於 hop2(藍)、hop2 嚴格小於 outer,不再交錯。
   const BAND_GAP = 60;
+  const hop1Cap = ringRadii[1];
   let maxHop1 = 0;
   for (const sn of simNodes) {
-    if (rings.get(sn.id) === 1) {
-      const r = Math.hypot(sn.x ?? 0, sn.y ?? 0);
-      if (r > maxHop1) maxHop1 = r;
+    if (rings.get(sn.id) !== 1) continue;
+    const r = Math.hypot(sn.x ?? 0, sn.y ?? 0);
+    if (r > hop1Cap && r > 0.01) {
+      const s = hop1Cap / r;
+      sn.x = (sn.x ?? 0) * s;
+      sn.y = (sn.y ?? 0) * s;
     }
+    const newR = Math.hypot(sn.x ?? 0, sn.y ?? 0);
+    if (newR > maxHop1) maxHop1 = newR;
   }
   const hop2Floor = maxHop1 + BAND_GAP;
   let maxHop2 = 0;
