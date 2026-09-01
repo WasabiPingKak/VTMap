@@ -13,7 +13,13 @@ import {
 } from "react";
 import GraphCanvas, { type GraphCanvasHandle, type CanvasTransform } from "./GraphCanvas";
 import HoverCard, { type HoverCardData } from "./HoverCard";
-import { computeLayout, DEFAULT_TUNING, EGO_OUTER_RING, type LayoutTuning } from "./layout";
+import {
+  computeLayout,
+  DEFAULT_TUNING,
+  EGO_OUTER_RING,
+  type EgoLayoutMode,
+  type LayoutTuning,
+} from "./layout";
 import {
   bakeDimLayer,
   bakeEdgeLayers,
@@ -37,6 +43,8 @@ interface NetworkGraphProps {
   panelInset?: number;
   /** ego 模式 layout 微調參數;省略 = 用預設值 */
   tuning?: LayoutTuning;
+  /** ego 佈局模式:rings(同心環)/ force(力導向)/ sunburst(徑向樹);預設 rings */
+  egoMode?: EgoLayoutMode;
 }
 
 export interface NetworkGraphHandle {
@@ -48,7 +56,7 @@ export interface NetworkGraphHandle {
 }
 
 const NetworkGraph = forwardRef<NetworkGraphHandle, NetworkGraphProps>(function NetworkGraph(
-  { data, focusedId, egoCenterId, onFocusChange, panelInset = 0, tuning = DEFAULT_TUNING },
+  { data, focusedId, egoCenterId, onFocusChange, panelInset = 0, tuning = DEFAULT_TUNING, egoMode = "rings" },
   ref,
 ) {
   const canvasRef = useRef<GraphCanvasHandle | null>(null);
@@ -67,7 +75,7 @@ const NetworkGraph = forwardRef<NetworkGraphHandle, NetworkGraphProps>(function 
       const next = computeLayout(
         data,
         undefined,
-        egoCenterId ? { centerId: egoCenterId } : undefined,
+        egoCenterId ? { centerId: egoCenterId, mode: egoMode } : undefined,
         tuning,
       );
       // 主動修剪 module-level sprite 快取:切 ego 圓心 / 資料換版時,
@@ -77,7 +85,7 @@ const NetworkGraph = forwardRef<NetworkGraphHandle, NetworkGraphProps>(function 
       setIsComputing(false);
     }, 30);
     return () => clearTimeout(timer);
-  }, [data, egoCenterId, tuning]);
+  }, [data, egoCenterId, tuning, egoMode]);
 
   const starField = useMemo(() => createStarField(), []);
 
