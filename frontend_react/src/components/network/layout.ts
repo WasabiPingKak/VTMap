@@ -40,8 +40,18 @@ interface SimNode extends SimulationNodeDatum {
   id: string;
 }
 
+/**
+ * ego 模式的三種佈局:
+ * - rings:同心環 + 硬性徑向分帶(距離語意);目前的預設
+ * - force:d3-force 圓心固定,其他自然聚合(社群語意)
+ * - sunburst:radial tree,hop1 均分扇區,hop2/3 落在 parent 扇區內(親子語意)
+ */
+export type EgoLayoutMode = "rings" | "force" | "sunburst";
+
 export interface EgoOptions {
   centerId: string;
+  /** 佈局模式,預設 rings */
+  mode?: EgoLayoutMode;
 }
 
 /** ego 模式可從 UI 微調的 layout 參數,全部保留現行預設值 */
@@ -228,8 +238,8 @@ function computeCommunitySectorAngles(
   return angleById;
 }
 
-/** ego 模式:d3-force 分環放射佈局,回傳每個節點的座標(依 data.nodes 順序) */
-function computeEgoPositions(
+/** ego 模式 rings 佈局:d3-force 分環放射,回傳每個節點的座標(依 data.nodes 順序) */
+function computeEgoRingsPositions(
   data: NetworkGraphData,
   rings: Map<string, number>,
   halfWidthById: Map<string, number>,
@@ -342,6 +352,177 @@ function computeEgoPositions(
   return simNodes.map((sn) => ({ x: sn.x ?? 0, y: sn.y ?? 0 }));
 }
 
+/**
+ * ego 模式 force 佈局:圓心固定 (0,0),其他節點只受 link/charge/collide 拉扯,自然聚合成社群。
+ * 沒有環半徑約束、沒有硬性徑向分帶,rings 依 BFS 分色仍有效(hop1/2/3 顏色不變)。
+ * 加一股弱重力拉向圓心,避免孤島飛太遠。
+ */
+function computeEgoForcePositions(
+  data: NetworkGraphData,
+  rings: Map<string, number>,
+  metrics: { halfWidth: number }[],
+  tuning: LayoutTuning,
+): { x: number; y: number }[] {
+  const nodeIds = data.nodes.map((n) => n.channel_id);
+  const nodeIdSet = new Set(nodeIds);
+  const simNodes: SimNode[] = data.nodes.map((n) => ({ id: n.channel_id }));
+  const simLinks = data.edges
+    .filter((e) => nodeIdSet.has(e.a) && nodeIdSet.has(e.b))
+    .map((e) => ({ source: e.a, target: e.b }));
+
+  // 初始位置:hop 環當初始半徑,角度 hash,讓 sim 有個合理起點
+  for (const sn of simNodes) {
+    const ring = rings.get(sn.id) ?? EGO_OUTER_RING;
+    if (ring === 0) {
+      sn.fx = 0;
+      sn.fy = 0;
+      continue;
+    }
+    const angle = hashAngle(sn.id);
+    const initRadius = 200 + ring * 150;
+    sn.x = Math.cos(angle) * initRadius;
+    sn.y = Math.sin(angle) * initRadius;
+  }
+
+  const sim = forceSimulation(simNodes)
+    .force(
+      "link",
+      forceLink(simLinks)
+        .id((d) => (d as SimNode).id)
+        .strength(tuning.linkStrength),
+    )
+    .force("charge", forceManyBody().strength(tuning.chargeStrength))
+    .force(
+      "collide",
+      forceCollide(
+        (_d, i) => Math.max(metrics[i].halfWidth, HEX_RADIUS) + tuning.collidePadding,
+      ),
+    )
+    // 弱重力:確保跟圓心無連線的節點不會飄到天邊
+    .force("gravity", forceRadial(0, 0, 0).strength(0.02))
+    .stop();
+
+  const ticks = Math.ceil(Math.log(sim.alphaMin()) / Math.log(1 - sim.alphaDecay()));
+  sim.tick(ticks);
+
+  return simNodes.map((sn) => ({ x: sn.x ?? 0, y: sn.y ?? 0 }));
+}
+
+/**
+ * ego 模式 sunburst 佈局:radial tree。
+ * - hop1 均分 2π
+ * - hop2 挑一個 hop1 parent(第一個找到的),放在 parent 的角度扇區內
+ * - hop3 同理挑 hop2 parent
+ * - 外圍(ring 4)用 hashAngle,放在最外圈
+ *
+ * 節點有多個 parent 時武斷選第一個(親子語意的固有限制)。
+ */
+function computeEgoSunburstPositions(
+  data: NetworkGraphData,
+  rings: Map<string, number>,
+  halfWidthById: Map<string, number>,
+): { x: number; y: number }[] {
+  const nodeIds = data.nodes.map((n) => n.channel_id);
+  const adjacency = buildAdjacency(data);
+  const ringRadii = computeRingRadii(rings, halfWidthById);
+
+  const hop1Ids = nodeIds.filter((id) => rings.get(id) === 1);
+  const hop2Ids = nodeIds.filter((id) => rings.get(id) === 2);
+  const hop3Ids = nodeIds.filter((id) => rings.get(id) === 3);
+
+  // hop1:2π 平均分配
+  const angleById = new Map<string, number>();
+  const hop1Wedge = (2 * Math.PI) / Math.max(hop1Ids.length, 1);
+  hop1Ids.forEach((id, i) => {
+    angleById.set(id, i * hop1Wedge);
+  });
+
+  // hop2:挑一個 hop1 parent,依 parent 分組後在 parent 的扇區內均分
+  const hop2ByParent = new Map<string, string[]>();
+  const hop2Orphan: string[] = [];
+  for (const id of hop2Ids) {
+    const parent = [...(adjacency.get(id) ?? [])].find((p) => rings.get(p) === 1);
+    if (parent) {
+      if (!hop2ByParent.has(parent)) hop2ByParent.set(parent, []);
+      hop2ByParent.get(parent)!.push(id);
+    } else {
+      hop2Orphan.push(id);
+    }
+  }
+  // 每個 hop2 分到自己的角寬(等於 hop1 扇區的 90% / 兄弟姊妹數),供 hop3 再細分用
+  const hop2OwnWedge = new Map<string, number>();
+  for (const [, children] of hop2ByParent) {
+    const per = (hop1Wedge * 0.9) / children.length;
+    for (const childId of children) hop2OwnWedge.set(childId, per);
+  }
+  for (const [parent, children] of hop2ByParent) {
+    const parentAngle = angleById.get(parent)!;
+    const subWedge = hop1Wedge * 0.9;
+    const startAngle = parentAngle - subWedge / 2;
+    children.forEach((childId, i) => {
+      const t = children.length === 1 ? 0.5 : i / (children.length - 1);
+      angleById.set(childId, startAngle + subWedge * t);
+    });
+  }
+  hop2Orphan.forEach((id) => angleById.set(id, hashAngle(id)));
+
+  // hop3:挑一個 hop2 parent,依 parent 自己的角寬再細分
+  const hop3ByParent = new Map<string, string[]>();
+  const hop3Orphan: string[] = [];
+  for (const id of hop3Ids) {
+    const parent = [...(adjacency.get(id) ?? [])].find((p) => rings.get(p) === 2);
+    if (parent && angleById.has(parent)) {
+      if (!hop3ByParent.has(parent)) hop3ByParent.set(parent, []);
+      hop3ByParent.get(parent)!.push(id);
+    } else {
+      hop3Orphan.push(id);
+    }
+  }
+  for (const [parent, children] of hop3ByParent) {
+    const parentAngle = angleById.get(parent)!;
+    const parentWedge = hop2OwnWedge.get(parent) ?? hop1Wedge * 0.1;
+    const subWedge = parentWedge * 0.9;
+    const startAngle = parentAngle - subWedge / 2;
+    children.forEach((childId, i) => {
+      const t = children.length === 1 ? 0.5 : i / (children.length - 1);
+      angleById.set(childId, startAngle + subWedge * t);
+    });
+  }
+  hop3Orphan.forEach((id) => angleById.set(id, hashAngle(id)));
+
+  return data.nodes.map((n) => {
+    const id = n.channel_id;
+    const ring = rings.get(id) ?? EGO_OUTER_RING;
+    if (ring === 0) return { x: 0, y: 0 };
+    const angle =
+      ring === EGO_OUTER_RING
+        ? hashAngle(id)
+        : angleById.get(id) ?? hashAngle(id);
+    return {
+      x: Math.cos(angle) * ringRadii[ring],
+      y: Math.sin(angle) * ringRadii[ring],
+    };
+  });
+}
+
+/** ego 模式:依 mode 分派到對應佈局函式 */
+function computeEgoPositions(
+  data: NetworkGraphData,
+  rings: Map<string, number>,
+  halfWidthById: Map<string, number>,
+  metrics: { halfWidth: number }[],
+  tuning: LayoutTuning,
+  mode: EgoLayoutMode,
+): { x: number; y: number }[] {
+  if (mode === "force") {
+    return computeEgoForcePositions(data, rings, metrics, tuning);
+  }
+  if (mode === "sunburst") {
+    return computeEgoSunburstPositions(data, rings, halfWidthById);
+  }
+  return computeEgoRingsPositions(data, rings, halfWidthById, metrics, tuning);
+}
+
 /** 全圖模式:ForceAtlas2,社群自然聚攏 */
 function computeGlobalPositions(data: NetworkGraphData): { x: number; y: number }[] {
   const graph = buildGraph(data);
@@ -444,7 +625,7 @@ export function computeLayout(
   const communities = basis.communities;
 
   const positions = egoActive
-    ? computeEgoPositions(data, rings!, halfWidthById, metrics, tuning)
+    ? computeEgoPositions(data, rings!, halfWidthById, metrics, tuning, ego!.mode ?? "rings")
     : basis.positions;
 
   // 矩形分離:保證「節點 + 下方標籤」零重疊

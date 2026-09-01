@@ -13,13 +13,16 @@ import NetworkToolbar from "@/components/network/NetworkToolbar";
 import NetworkLegend from "@/components/network/NetworkLegend";
 import RecentNodesPanel from "@/components/network/RecentNodesPanel";
 import TuningPanel from "@/components/network/TuningPanel";
-import { DEFAULT_TUNING, type LayoutTuning } from "@/components/network/layout";
+import EgoModeToggle from "@/components/network/EgoModeToggle";
+import { DEFAULT_TUNING, type EgoLayoutMode, type LayoutTuning } from "@/components/network/layout";
 import { useNetworkGraph } from "@/hooks/useNetworkGraph";
 import { useMyChannelId } from "@/hooks/useMyChannelId";
 
 const PANEL_INSET = 340;
 const TUNING_STORAGE_KEY = "vtmap.network.tuning.v1";
 const TUNING_DEBOUNCE_MS = 300;
+const EGO_MODE_STORAGE_KEY = "vtmap.network.egoMode.v1";
+const VALID_EGO_MODES: EgoLayoutMode[] = ["rings", "force", "sunburst"];
 
 function loadStoredTuning(): LayoutTuning {
   if (typeof window === "undefined") return DEFAULT_TUNING;
@@ -34,6 +37,12 @@ function loadStoredTuning(): LayoutTuning {
   }
 }
 
+function loadStoredEgoMode(): EgoLayoutMode {
+  if (typeof window === "undefined") return "rings";
+  const raw = window.localStorage.getItem(EGO_MODE_STORAGE_KEY);
+  return VALID_EGO_MODES.includes(raw as EgoLayoutMode) ? (raw as EgoLayoutMode) : "rings";
+}
+
 export default function NetworkPage() {
   const { data, isLoading, isError } = useNetworkGraph();
   const { data: me } = useMyChannelId();
@@ -45,6 +54,14 @@ export default function NetworkPage() {
   // 兩份 tuning:編輯用即時更新面板 UI,committed 延遲 300ms 才觸發 re-layout
   const [tuning, setTuning] = useState<LayoutTuning>(loadStoredTuning);
   const [committedTuning, setCommittedTuning] = useState<LayoutTuning>(tuning);
+  const [egoMode, setEgoMode] = useState<EgoLayoutMode>(loadStoredEgoMode);
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(EGO_MODE_STORAGE_KEY, egoMode);
+    } catch {
+      // localStorage 滿了或被 disable,忽略
+    }
+  }, [egoMode]);
   useEffect(() => {
     const t = window.setTimeout(() => setCommittedTuning(tuning), TUNING_DEBOUNCE_MS);
     try {
@@ -131,6 +148,7 @@ export default function NetworkPage() {
             onFocusChange={setFocus}
             panelInset={focusedId ? PANEL_INSET : 0}
             tuning={committedTuning}
+            egoMode={egoMode}
           />
           <NetworkToolbar
             data={data}
@@ -149,7 +167,7 @@ export default function NetworkPage() {
             />
           )}
           <NetworkLegend />
-          {/* 上方中央:圓心 pill + 定位按鈕(從左工具列搬過來,語意上跟圓心/選取狀態綁在一起)*/}
+          {/* 上方中央:圓心 pill + 佈局模式切換 + 定位按鈕 */}
           <div className="absolute top-3 left-1/2 -translate-x-1/2 z-10 flex flex-col items-center gap-2">
             {centerNode && (
               <div className="flex items-center gap-2 rounded-full bg-amber-500/15 border border-amber-500/60 px-3 py-1 text-sm text-amber-300">
@@ -163,6 +181,7 @@ export default function NetworkPage() {
                 </button>
               </div>
             )}
+            {centerNode && <EgoModeToggle mode={egoMode} onChange={setEgoMode} />}
             <button
               onClick={handleLocate}
               aria-label="定位"
