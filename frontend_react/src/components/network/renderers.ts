@@ -758,9 +758,10 @@ export function drawNetwork(
   const baked = layout.bakedEdges;
 
   if (baked) {
-    // 非 ego / fallback:全部邊都在 base,灰色 EDGE_ALPHA。focus 時淡化讓 overlay 浮出。
-    const baseAlpha = state.focusedId !== null ? EDGE_DIM_ALPHA : EDGE_ALPHA;
-    const hopAlpha = state.focusedId !== null ? EDGE_DIM_ALPHA : EDGE_HOP_ALPHA;
+    // 非 ego / fallback:全部邊都在 base,灰色 EDGE_ALPHA。focus 或 hover 時淡化讓 overlay 浮出。
+    const hasHighlight = state.focusedId !== null || state.hoveredId !== null;
+    const baseAlpha = hasHighlight ? EDGE_DIM_ALPHA : EDGE_ALPHA;
+    const hopAlpha = hasHighlight ? EDGE_DIM_ALPHA : EDGE_HOP_ALPHA;
     ctx.strokeStyle = EDGE_COLOR;
     ctx.globalAlpha = baseAlpha;
     for (const [widthBucket, path] of baked.base) {
