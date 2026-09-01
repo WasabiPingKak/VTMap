@@ -140,15 +140,66 @@ function hashAngle(id: string): number {
   return ((hash >>> 0) % 3600) * (Math.PI / 1800);
 }
 
+/**
+ * ego 模式初始角度:對 hop1+hop2 子圖跑 Louvain,依社群大小切扇區,
+ * 同社群節點放在同扇區、不同社群拉開,避免 hop2 全擠一坨。
+ * 社群大小決定扇區占比(至少 15°,避免小社群變成一個點)。
+ */
+function computeCommunitySectorAngles(
+  data: NetworkGraphData,
+  rings: Map<string, number>,
+): Map<string, number> {
+  const inSub = (id: string): boolean => {
+    const r = rings.get(id);
+    return r === 1 || r === 2;
+  };
+  const subNodes = data.nodes.filter((n) => inSub(n.channel_id));
+  const subEdges = data.edges.filter((e) => inSub(e.a) && inSub(e.b));
+  const communities =
+    subNodes.length > 0 ? detectCommunities({ nodes: subNodes, edges: subEdges }) : new Map();
+
+  const byCommunity = new Map<number, string[]>();
+  for (const n of subNodes) {
+    const c = communities.get(n.channel_id) ?? 0;
+    if (!byCommunity.has(c)) byCommunity.set(c, []);
+    byCommunity.get(c)!.push(n.channel_id);
+  }
+  const commList = [...byCommunity.entries()].sort((a, b) => b[1].length - a[1].length);
+
+  const totalSize = subNodes.length || 1;
+  const MIN_SECTOR = (2 * Math.PI) / 24; // 15° 下限,避免單節點社群塌成一點
+  // 先算出每個社群需要的扇區大小,超過 2π 時等比縮回
+  const rawSectors = commList.map(([, members]) => {
+    const proportional = (members.length / totalSize) * 2 * Math.PI;
+    return Math.max(proportional, MIN_SECTOR);
+  });
+  const totalRaw = rawSectors.reduce((s, v) => s + v, 0);
+  const scale = totalRaw > 2 * Math.PI ? (2 * Math.PI) / totalRaw : 1;
+
+  const angleById = new Map<string, number>();
+  let cursor = 0;
+  for (let i = 0; i < commList.length; i++) {
+    const [, members] = commList[i];
+    const sector = rawSectors[i] * scale;
+    // 扇區內兩端各留 5% 邊,避免緊鄰扇區的節點角度重疊
+    const usable = sector * 0.9;
+    const startPad = sector * 0.05;
+    members.forEach((id, j) => {
+      const t = members.length === 1 ? 0.5 : j / (members.length - 1);
+      angleById.set(id, cursor + startPad + usable * t);
+    });
+    cursor += sector;
+  }
+  return angleById;
+}
+
 /** ego 模式:d3-force 分環放射佈局,回傳每個節點的座標(依 data.nodes 順序) */
 function computeEgoPositions(
   data: NetworkGraphData,
-  centerId: string,
   rings: Map<string, number>,
   halfWidthById: Map<string, number>,
   metrics: { halfWidth: number }[],
 ): { x: number; y: number }[] {
-  const adjacency = buildAdjacency(data);
   const nodeIds = data.nodes.map((n) => n.channel_id);
   const ringRadii = computeRingRadii(rings, halfWidthById);
 
@@ -158,24 +209,12 @@ function computeEgoPositions(
     .filter((e) => nodeIdSet.has(e.a) && nodeIdSet.has(e.b))
     .map((e) => ({ source: e.a, target: e.b }));
 
-  const byRing: string[][] = [[], [], [], []];
-  for (const id of nodeIds) byRing[rings.get(id)!].push(id);
-
-  const angleById = new Map<string, number>();
-  byRing[1].forEach((id, i) => {
-    angleById.set(id, (i / Math.max(byRing[1].length, 1)) * 2 * Math.PI);
-  });
-  for (const id of byRing[2]) {
-    // 靠向第一環父節點的平均角度,減少跨環交叉
-    const parents = [...(adjacency.get(id) ?? [])].filter((p) => rings.get(p) === 1);
-    if (parents.length) {
-      const angles = parents.map((p) => angleById.get(p) ?? 0);
-      angleById.set(id, angles.reduce((s, a) => s + a, 0) / angles.length + hashAngle(id) * 0.05);
-    } else {
-      angleById.set(id, hashAngle(id));
-    }
+  // hop1+hop2 依 Louvain 社群分角度扇區,同社群靠在同扇區,不同社群拉開角度。
+  // 這樣 hop2 就不會全擠一起,自然依邊密度分成幾個明顯次群。
+  const angleById = computeCommunitySectorAngles(data, rings);
+  for (const id of nodeIds) {
+    if (rings.get(id) === EGO_OUTER_RING) angleById.set(id, hashAngle(id));
   }
-  for (const id of byRing[3]) angleById.set(id, hashAngle(id));
 
   for (const sn of simNodes) {
     const ring = rings.get(sn.id)!;
@@ -366,7 +405,7 @@ export function computeLayout(
   const communities = basis.communities;
 
   const positions = egoActive
-    ? computeEgoPositions(data, ego!.centerId, rings!, halfWidthById, metrics)
+    ? computeEgoPositions(data, rings!, halfWidthById, metrics)
     : basis.positions;
 
   // 矩形分離:保證「節點 + 下方標籤」零重疊
