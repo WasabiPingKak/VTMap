@@ -60,6 +60,8 @@ export interface LayoutTuning {
   hop1CapMultiplier: number;
   /** hop2 半徑上限的倍率(乘上 ringRadii[2],0.5–2.0) */
   hop2CapMultiplier: number;
+  /** 外圍(灰點)半徑上限的倍率(乘上 ringRadii[3],0.3–2.0);< 1 可把灰點拉近 */
+  outerCapMultiplier: number;
 }
 
 export const DEFAULT_TUNING: LayoutTuning = {
@@ -70,6 +72,7 @@ export const DEFAULT_TUNING: LayoutTuning = {
   bandGap: 60,
   hop1CapMultiplier: 1,
   hop2CapMultiplier: 1,
+  outerCapMultiplier: 1,
 };
 
 /** 外圍(與圓心兩層內無關)的環編號 */
@@ -327,11 +330,18 @@ function computeEgoPositions(
     if (newR > maxHop2) maxHop2 = newR;
   }
   const outerFloor = maxHop2 + BAND_GAP;
+  const outerCap = Math.max(ringRadii[3] * tuning.outerCapMultiplier, outerFloor);
   for (const sn of simNodes) {
     if (rings.get(sn.id) !== EGO_OUTER_RING) continue;
     const r = Math.hypot(sn.x ?? 0, sn.y ?? 0);
     if (r < outerFloor && r > 0.01) {
       const s = outerFloor / r;
+      sn.x = (sn.x ?? 0) * s;
+      sn.y = (sn.y ?? 0) * s;
+    }
+    const r2 = Math.hypot(sn.x ?? 0, sn.y ?? 0);
+    if (r2 > outerCap && r2 > 0.01) {
+      const s = outerCap / r2;
       sn.x = (sn.x ?? 0) * s;
       sn.y = (sn.y ?? 0) * s;
     }
