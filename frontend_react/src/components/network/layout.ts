@@ -214,8 +214,9 @@ function computeEgoPositions(
   const ticks = Math.ceil(Math.log(sim.alphaMin()) / Math.log(1 - sim.alphaDecay()));
   sim.tick(ticks);
 
-  // 硬性徑向分帶:sim 決定角度,再依環別把 hop1 拉回上限、hop2/outer 推出下限,
-  // 確保 hop1(綠)緊貼圓心、半徑嚴格小於 hop2(藍)、hop2 嚴格小於 outer,不再交錯。
+  // 硬性徑向分帶:sim 決定角度,再依環別把 hop1/hop2 壓回上限、hop2/outer 推出下限,
+  // 確保 hop1(綠)與 hop2(藍)各自都在對應圓周內(不會被 link 力拉到天邊),
+  // 且 hop1 < hop2 < outer 三環嚴格分離。
   const BAND_GAP = 60;
   const hop1Cap = ringRadii[1];
   let maxHop1 = 0;
@@ -231,12 +232,19 @@ function computeEgoPositions(
     if (newR > maxHop1) maxHop1 = newR;
   }
   const hop2Floor = maxHop1 + BAND_GAP;
+  const hop2Cap = ringRadii[2];
   let maxHop2 = 0;
   for (const sn of simNodes) {
     if (rings.get(sn.id) !== 2) continue;
     const r = Math.hypot(sn.x ?? 0, sn.y ?? 0);
     if (r < hop2Floor && r > 0.01) {
       const s = hop2Floor / r;
+      sn.x = (sn.x ?? 0) * s;
+      sn.y = (sn.y ?? 0) * s;
+    }
+    const r2 = Math.hypot(sn.x ?? 0, sn.y ?? 0);
+    if (r2 > hop2Cap && r2 > 0.01) {
+      const s = hop2Cap / r2;
       sn.x = (sn.x ?? 0) * s;
       sn.y = (sn.y ?? 0) * s;
     }
