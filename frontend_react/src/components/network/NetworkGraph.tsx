@@ -13,7 +13,7 @@ import {
 } from "react";
 import GraphCanvas, { type GraphCanvasHandle, type CanvasTransform } from "./GraphCanvas";
 import HoverCard, { type HoverCardData } from "./HoverCard";
-import { computeLayout, DEFAULT_TUNING, type LayoutTuning } from "./layout";
+import { computeLayout, DEFAULT_TUNING, EGO_OUTER_RING, type LayoutTuning } from "./layout";
 import {
   bakeDimLayer,
   bakeEdgeLayers,
@@ -117,13 +117,13 @@ const NetworkGraph = forwardRef<NetworkGraphHandle, NetworkGraphProps>(function 
     focusedIdRef.current = focusedId;
   }, [focusedId]);
 
-  // 外框顏色的參考點:目前選取優先,其次圓心;BFS 兩層跳數
+  // 外框顏色的參考點:目前選取優先,其次圓心;BFS 三層跳數(對應 hop1/hop2/hop3 三個環)
   const referenceId = focusedId ?? egoCenterId;
   const hopDistances = useMemo(() => {
     if (!layout || !referenceId || !layout.byId.has(referenceId)) return null;
     const distances = new Map<string, number>([[referenceId, 0]]);
     let frontier = [referenceId];
-    for (let hop = 1; hop <= 2; hop++) {
+    for (let hop = 1; hop <= 3; hop++) {
       const next: string[] = [];
       for (const id of frontier) {
         for (const neighbor of layout.neighbors.get(id) ?? []) {
@@ -279,7 +279,7 @@ const NetworkGraph = forwardRef<NetworkGraphHandle, NetworkGraphProps>(function 
     let maxX = -Infinity;
     let maxY = -Infinity;
     for (const n of layout.nodes) {
-      if (layout.rings && (layout.rings.get(n.node.channel_id) ?? 0) >= 3) continue;
+      if (layout.rings && (layout.rings.get(n.node.channel_id) ?? 0) >= EGO_OUTER_RING) continue;
       minX = Math.min(minX, n.x - n.labelHalfWidth);
       maxX = Math.max(maxX, n.x + n.labelHalfWidth);
       minY = Math.min(minY, n.y - 22);
