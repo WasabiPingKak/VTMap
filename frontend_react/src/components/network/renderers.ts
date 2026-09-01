@@ -51,8 +51,6 @@ const DOTS_ONLY_SCALE = 0.25;
 const GLOW_MIN_SCALE = 0.4;
 /** 縮放小於此值時社群 halo 相互重疊糊在一起,不畫可省下大量 overdraw */
 const HALO_MIN_SCALE = 0.35;
-/** 縮放小於此值時 dim 節點的標籤本來就淡到看不清,跳過省下大量 label drawImage */
-const DIM_LABEL_MIN_SCALE = 1.0;
 /** 社群暈染半徑(world px) */
 const HALO_RADIUS = 110;
 /** 視野裁剪的寬容邊距(world px,涵蓋暈染與標籤外溢) */
@@ -1038,12 +1036,9 @@ function drawLabels(
   const nodes = state.layout.nodes;
   const { visible, isDim } = visuals;
   const nodeCount = nodes.length;
-  // 中縮放時 dim 節點(ego 外圍等)本來 alpha 就 0.4 淡到糊,直接跳整批 label drawImage
-  const skipDimLabels = scale < DIM_LABEL_MIN_SCALE;
   for (let i = 0; i < nodeCount; i++) {
     if (!visible[i]) continue;
     const dim = isDim[i];
-    if (dim && skipDimLabels) continue;
     const node = nodes[i];
     const startY = node.y + HEX_RADIUS + fontSize * LABEL_GAP_RATIO;
 
