@@ -99,3 +99,24 @@ class TestNetworkRecent:
         mock_recent.return_value = {"nodes": []}
         client.get("/api/network/recent?limit=abc")
         mock_recent.assert_called_once_with(20)
+
+
+class TestNetworkQueueRank:
+    """GET /api/network/queue-rank/<channel_id>"""
+
+    @patch("routes.network_route.get_queue_rank")
+    def test_returns_rank(self, mock_rank, client):
+        mock_rank.return_value = {"rank": 42}
+        resp = client.get("/api/network/queue-rank/UC_abc")
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["success"] is True
+        assert data["rank"] == 42
+        mock_rank.assert_called_once_with("UC_abc")
+
+    @patch("routes.network_route.get_queue_rank")
+    def test_returns_null_when_no_pending_task(self, mock_rank, client):
+        mock_rank.return_value = {"rank": None}
+        resp = client.get("/api/network/queue-rank/UC_none")
+        assert resp.status_code == 200
+        assert resp.get_json()["rank"] is None

@@ -40,6 +40,47 @@ where badge_type = 'moderator'
 order by video_published_at desc nulls last
 """
 
+# 節點在爬蟲佇列的累計順位:
+# stage 1 check_qualification → stage 2 list_videos → stage 3 fetch_chat。
+# 找出該頻道最早階段的 pending task,rank = 該階段內名次 + 更早階段的 pending 總數。
+# 沒有任何 pending task 時 my_task 空,整個查詢回空(rank=null,前端顯示「尚未在掃描隊列中」)。
+# stage 2 依 priority desc(reprioritize 過)、其餘依 id asc(FIFO)。
+QUEUE_RANK_SQL = """
+with stages as (
+  select
+    (select count(*) from crawl_queue where status = 'pending' and kind = 'check_qualification') as cq_total,
+    (select count(*) from crawl_queue where status = 'pending' and kind = 'list_videos') as lv_total
+),
+my_task as (
+  select kind, priority, id
+  from crawl_queue
+  where channel_id = %s and status = 'pending'
+  order by
+    case kind
+      when 'check_qualification' then 1
+      when 'list_videos' then 2
+      when 'fetch_chat' then 3
+    end,
+    id asc
+  limit 1
+)
+select
+  case mt.kind
+    when 'check_qualification' then
+      (select count(*) from crawl_queue
+       where status = 'pending' and kind = 'check_qualification' and id <= mt.id)
+    when 'list_videos' then
+      s.cq_total + (select count(*) from crawl_queue
+                    where status = 'pending' and kind = 'list_videos'
+                      and (priority > mt.priority
+                           or (priority = mt.priority and id <= mt.id)))
+    when 'fetch_chat' then
+      s.cq_total + s.lv_total + (select count(*) from crawl_queue
+                                 where status = 'pending' and kind = 'fetch_chat' and id <= mt.id)
+  end as rank
+from stages s, my_task mt
+"""
+
 # 最近加入的頻道(側邊「最新加入」面板用)。
 # 只取有出現在圖上的頻道(避免顯示 0 條線的孤點讓使用者感到訝異),
 # 依 created_at 降冪,limit 由呼叫端傳入(避免 SQL 注入,靠參數)。
@@ -146,3 +187,13 @@ def fetch_recent_payload(conn: Any, limit: int) -> dict:
         cur.execute(RECENT_SQL, (limit,))
         rows = cur.fetchall()
     return build_recent_payload(rows)
+
+
+def fetch_queue_rank(conn: Any, channel_id: str) -> int | None:
+    """回傳該頻道在爬蟲佇列的累計順位;沒有 pending task 時回 None。"""
+    with conn.cursor() as cur:
+        cur.execute(QUEUE_RANK_SQL, (channel_id,))
+        row = cur.fetchone()
+    if row is None or row[0] is None:
+        return None
+    return int(row[0])

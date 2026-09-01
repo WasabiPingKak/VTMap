@@ -5,6 +5,7 @@
 import { useMemo } from "react";
 import { Crosshair, X } from "lucide-react";
 import type { NetworkEdge, NetworkGraphData, NetworkNode } from "@/types/network";
+import { useQueueRank } from "@/hooks/useQueueRank";
 import { channelDisplayName, channelInitial } from "./displayName";
 import { formatSubscribers } from "./formatters";
 
@@ -52,6 +53,8 @@ export default function DetailPanel({
   }, [data, focusedId, nodeById]);
 
   const channel = nodeById.get(focusedId);
+  // 等待掃描節點才問順位;hook 內部再看 enabled=false 就不 fetch
+  const queueRank = useQueueRank(focusedId, !!channel && !channel.scanned);
   if (!channel) return null;
 
   const isCenter = centerId === focusedId;
@@ -110,9 +113,23 @@ export default function DetailPanel({
       {!channel.scanned && (
         <div className="mx-4 mt-3 rounded-md border border-amber-800/60 bg-amber-950/40 px-3 py-2 text-xs text-amber-200">
           <div className="font-medium mb-0.5">等待掃描</div>
-          <div className="text-amber-200/80">
-            此頻道的關係資料尚在蒐集中
-          </div>
+          <div className="text-amber-200/80">此頻道的關係資料尚在蒐集中</div>
+          {/* 順位:成功時才顯示,loading/error 不顯示避免噪音 */}
+          {queueRank.isSuccess && (
+            <div className="text-amber-200/80 mt-0.5">
+              {queueRank.data === null ? (
+                "尚未在掃描隊列中"
+              ) : (
+                <>
+                  排在第{" "}
+                  <span className="font-medium text-amber-100">
+                    {queueRank.data.toLocaleString("zh-TW")}
+                  </span>{" "}
+                  位
+                </>
+              )}
+            </div>
+          )}
         </div>
       )}
 
