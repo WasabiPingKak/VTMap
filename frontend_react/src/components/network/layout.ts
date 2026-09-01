@@ -74,8 +74,8 @@ export const DEFAULT_TUNING: LayoutTuning = {
   bandGap: 60,
   hop1CapMultiplier: 1,
   hop2CapMultiplier: 1,
-  hop3CapMultiplier: 1,
-  outerCapMultiplier: 0.3,
+  hop3CapMultiplier: 0.5,
+  outerCapMultiplier: 1,
 };
 
 /** 外圍(與圓心三層內無關)的環編號 */

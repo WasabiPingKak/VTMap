@@ -37,9 +37,6 @@ import {
   HOP2_COLOR,
   HOP2_EDGE_COLOR,
   HOP2_GLOW,
-  HOP3_COLOR,
-  HOP3_EDGE_COLOR,
-  HOP3_GLOW,
   LABEL_COLOR,
   LABEL_DIM,
   NEIGHBOR_COLOR,
@@ -492,7 +489,7 @@ export function bakeEdgeLayers(layout: GraphLayout): BakedEdgeLayers | null {
     base: bakeEdgeGroup(be.base, aabbBase, EDGE_COLOR, null),
     baseHop1: be.baseHop1 ? bakeEdgeGroup(be.baseHop1, aabbHop1, HOP1_EDGE_COLOR, null) : null,
     baseHop2: be.baseHop2 ? bakeEdgeGroup(be.baseHop2, aabbHop2, HOP2_EDGE_COLOR, null) : null,
-    baseHop3: be.baseHop3 ? bakeEdgeGroup(be.baseHop3, aabbHop3, HOP3_EDGE_COLOR, null) : null,
+    baseHop3: be.baseHop3 ? bakeEdgeGroup(be.baseHop3, aabbHop3, EDGE_COLOR, null) : null,
     dim: be.dim ? bakeEdgeGroup(be.dim, aabbDim, EDGE_COLOR, DIM_EDGE_BAKE_LINE_WIDTH) : null,
   };
 }
@@ -768,10 +765,8 @@ function computeFrameVisuals(
     } else if (distance === 2) {
       color = HOP2_COLOR;
       glow = HOP2_GLOW;
-    } else if (distance === 3) {
-      color = HOP3_COLOR;
-      glow = HOP3_GLOW;
     } else {
+      // hop3 與更遠都用灰色(視覺上合併,但徑向仍分兩環)
       color = FAR_COLOR;
       glow = FAR_GLOW;
     }
@@ -890,10 +885,11 @@ export function drawNetwork(
     };
 
     drawGroup(bakedLayers?.base, baked.base, EDGE_COLOR, baseAlpha);
-    // ego 模式:hop1(綠)、hop2(藍)、hop3(紫)分別上色,讓分層結構本身就看得見,不用等 hover 才浮現
+    // ego 模式:hop1(綠)、hop2(藍)分別上色;hop3 跟灰色 base 邊同色但保留 hop 亮度,
+    // 讓分層結構本身就看得見,不用等 hover 才浮現
     drawGroup(bakedLayers?.baseHop1, baked.baseHop1, HOP1_EDGE_COLOR, hopAlpha);
     drawGroup(bakedLayers?.baseHop2, baked.baseHop2, HOP2_EDGE_COLOR, hopAlpha);
-    drawGroup(bakedLayers?.baseHop3, baked.baseHop3, HOP3_EDGE_COLOR, hopAlpha);
+    drawGroup(bakedLayers?.baseHop3, baked.baseHop3, EDGE_COLOR, hopAlpha);
     // dim:ego 外圍相關,alpha 固定 EDGE_DIM_ALPHA
     drawGroup(bakedLayers?.dim, baked.dim, EDGE_COLOR, EDGE_DIM_ALPHA);
 

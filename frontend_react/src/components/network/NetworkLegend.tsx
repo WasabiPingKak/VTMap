@@ -6,7 +6,6 @@ import {
   FAR_COLOR,
   FOCUSED_COLOR,
   HOP2_COLOR,
-  HOP3_COLOR,
   NEIGHBOR_COLOR,
 } from "./colors";
 
@@ -14,7 +13,6 @@ const ITEMS: { color: string; label: string }[] = [
   { color: FOCUSED_COLOR, label: "目前選取" },
   { color: NEIGHBOR_COLOR, label: "直接關係" },
   { color: HOP2_COLOR, label: "隔兩層關係" },
-  { color: HOP3_COLOR, label: "隔三層關係" },
   { color: FAR_COLOR, label: "更遠或未選取" },
 ];
 
