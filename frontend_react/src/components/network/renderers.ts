@@ -10,7 +10,7 @@
  */
 
 import type { CanvasTransform } from "./GraphCanvas";
-import type { GraphLayout, LayoutNode } from "@/types/network";
+import type { GraphLayout, LayoutEdge, LayoutNode } from "@/types/network";
 import { channelInitial } from "./displayName";
 import { communityColor } from "./communities";
 import { EGO_OUTER_RING, packHitCell } from "./layout";
@@ -807,14 +807,22 @@ export function drawNetwork(
       }
     }
 
-    // hover/focus 高亮 overlay:只 iterate 相關節點的鄰邊(通常 <500),疊在 baked 上。
+    // hover/focus 高亮 overlay:focus 節點的邊常駐,hover 別的節點時再疊上它的邊,兩者可同時亮。
     // 上面 hop-1/2 已切過 strokeStyle,此處要重設回 EDGE_COLOR。
-    const highlightId = state.focusedId ?? state.hoveredId;
-    if (highlightId) {
-      const related = layout.edgesByNode.get(highlightId);
-      if (related && related.length) {
-        const overlayGroups = new Map<number, Path2D>();
+    const highlightIds: string[] = [];
+    if (state.focusedId) highlightIds.push(state.focusedId);
+    if (state.hoveredId && state.hoveredId !== state.focusedId) {
+      highlightIds.push(state.hoveredId);
+    }
+    if (highlightIds.length) {
+      const overlayGroups = new Map<number, Path2D>();
+      const seenEdges = new Set<LayoutEdge>();
+      for (const id of highlightIds) {
+        const related = layout.edgesByNode.get(id);
+        if (!related) continue;
         for (const le of related) {
+          if (seenEdges.has(le)) continue;
+          seenEdges.add(le);
           // hover/focus 節點的所有連線都要高亮,包含通往外圍的邊(不再依 egoDim 過濾)
           let p = overlayGroups.get(le.widthBucket);
           if (!p) {
@@ -824,13 +832,13 @@ export function drawNetwork(
           p.moveTo(le.source.x, le.source.y);
           p.quadraticCurveTo(le.controlX, le.controlY, le.target.x, le.target.y);
         }
-        if (overlayGroups.size) {
-          ctx.strokeStyle = EDGE_COLOR;
-          ctx.globalAlpha = EDGE_HIGHLIGHT_ALPHA;
-          for (const [widthBucket, path] of overlayGroups) {
-            ctx.lineWidth = widthBucket / scale;
-            ctx.stroke(path);
-          }
+      }
+      if (overlayGroups.size) {
+        ctx.strokeStyle = EDGE_COLOR;
+        ctx.globalAlpha = EDGE_HIGHLIGHT_ALPHA;
+        for (const [widthBucket, path] of overlayGroups) {
+          ctx.lineWidth = widthBucket / scale;
+          ctx.stroke(path);
         }
       }
     }
@@ -838,16 +846,19 @@ export function drawNetwork(
     // fallback(測試環境無 Path2D):走原本 per-frame iterate 邏輯,不做 hop 上色
     ctx.strokeStyle = EDGE_COLOR;
     const edgeAlpha = (edgeA: string, edgeB: string): number => {
-      let alpha = EDGE_ALPHA;
-      let isHighlighted = false;
-      if (state.highlightIds !== null) {
-        const onFocus =
-          state.focusedId !== null && (edgeA === state.focusedId || edgeB === state.focusedId);
-        alpha = onFocus ? EDGE_HIGHLIGHT_ALPHA : EDGE_DIM_ALPHA;
-        isHighlighted = onFocus;
-      } else if (state.hoveredId && (edgeA === state.hoveredId || edgeB === state.hoveredId)) {
+      const onFocus =
+        state.focusedId !== null && (edgeA === state.focusedId || edgeB === state.focusedId);
+      const onHover =
+        state.hoveredId !== null && (edgeA === state.hoveredId || edgeB === state.hoveredId);
+      const isHighlighted = onFocus || onHover;
+
+      let alpha: number;
+      if (isHighlighted) {
         alpha = EDGE_HIGHLIGHT_ALPHA;
-        isHighlighted = true;
+      } else if (state.focusedId !== null || state.hoveredId !== null) {
+        alpha = EDGE_DIM_ALPHA;
+      } else {
+        alpha = EDGE_ALPHA;
       }
       // 通往外圍的邊平時淡化,但如果一端正是 hover/focus 節點,保留高亮
       if (!isHighlighted && (isEgoOuter(state, edgeA) || isEgoOuter(state, edgeB))) {
