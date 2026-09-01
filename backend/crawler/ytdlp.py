@@ -15,7 +15,20 @@ from crawler.settings import LIST_SCAN_MULTIPLIER
 
 logger = logging.getLogger(__name__)
 
-_YTDLP_BASE = [sys.executable, "-m", "yt_dlp", "--socket-timeout", "30", "--retries", "3"]
+# -X utf8:強制子程序用 UTF-8 讀寫 stdio。Windows 上 Python 預設走系統 locale
+# (繁中 = CP950),yt-dlp 輸出中文標題時 parent 用 UTF-8 decode 會炸,
+# reader thread 死在背景後 proc.stdout 變成 None,後續 splitlines 就 crash。
+_YTDLP_BASE = [
+    sys.executable,
+    "-X",
+    "utf8",
+    "-m",
+    "yt_dlp",
+    "--socket-timeout",
+    "30",
+    "--retries",
+    "3",
+]
 
 # yt-dlp 對「頻道沒有直播分頁」的錯誤訊息
 _NO_STREAMS_TAB_MARKERS = ("does not have a streams tab", "this channel does not have a")
