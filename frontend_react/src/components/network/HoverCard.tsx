@@ -1,5 +1,5 @@
 /**
- * 節點 hover 小卡:頭像 + 名稱 + handle + 訂閱數 + 相鄰節點數 + 圓心距離。
+ * 節點 hover 小卡:頭像 + 名稱 + handle + 訂閱數 + 圓心距離 + 相鄰節點數。
  * 貼在滑鼠位置附近,靠近邊緣時翻到反側。
  */
 
@@ -13,22 +13,22 @@ export interface HoverCardData {
   screenX: number;
   screenY: number;
   neighborCount: number;
-  /** ego 模式下的環別:0 圓心 / 1 直接 / 2 隔兩層 / 3 更遠;null = 非 ego 模式 */
-  ring: number | null;
+  /** 從圓心到此節點的 BFS 距離;0 = 圓心本人、undefined = 從圓心無法到達、null = 非 ego 模式 */
+  centerHopDistance: number | null | undefined;
 }
 
 interface HoverCardProps {
   info: HoverCardData;
 }
 
-const RING_LABEL: Record<number, string> = {
-  0: "圓心本人",
-  1: "直接關係",
-  2: "隔兩層",
-  3: "更遠",
-};
-
 const CURSOR_OFFSET = 16;
+
+function formatDistance(hop: number | null | undefined): string | null {
+  if (hop === null) return null;
+  if (hop === undefined) return "無法連通";
+  if (hop === 0) return "圓心本人";
+  return `${hop} 層`;
+}
 
 export default function HoverCard({ info }: HoverCardProps) {
   const cardRef = useRef<HTMLDivElement | null>(null);
@@ -54,7 +54,7 @@ export default function HoverCard({ info }: HoverCardProps) {
 
   const node = info.node.node;
   const title = channelDisplayName(node);
-  const ringLabel = info.ring !== null ? RING_LABEL[info.ring] : null;
+  const distanceLabel = formatDistance(info.centerHopDistance);
 
   return (
     <div
@@ -84,16 +84,16 @@ export default function HoverCard({ info }: HoverCardProps) {
           <span className="text-slate-500">訂閱數</span>
           <span className="truncate">{formatSubscribers(node.subscriber_count)}</span>
         </div>
+        {distanceLabel && (
+          <div className="flex justify-between gap-2">
+            <span className="text-slate-500">與圓心距離</span>
+            <span>{distanceLabel}</span>
+          </div>
+        )}
         <div className="flex justify-between gap-2">
           <span className="text-slate-500">相鄰節點</span>
           <span>{info.neighborCount} 個</span>
         </div>
-        {ringLabel && (
-          <div className="flex justify-between gap-2">
-            <span className="text-slate-500">與圓心距離</span>
-            <span>{ringLabel}</span>
-          </div>
-        )}
       </div>
     </div>
   );

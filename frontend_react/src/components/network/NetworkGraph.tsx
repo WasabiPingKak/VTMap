@@ -135,6 +135,28 @@ const NetworkGraph = forwardRef<NetworkGraphHandle, NetworkGraphProps>(function 
     return distances;
   }, [layout, referenceId]);
 
+  // hover 小卡用:從圓心到每個節點的完整 BFS 距離(不限層數),ego 模式才算
+  const centerHopDistances = useMemo(() => {
+    if (!layout || !egoCenterId || !layout.byId.has(egoCenterId)) return null;
+    const distances = new Map<string, number>([[egoCenterId, 0]]);
+    let frontier = [egoCenterId];
+    let hop = 0;
+    while (frontier.length) {
+      hop += 1;
+      const next: string[] = [];
+      for (const id of frontier) {
+        for (const neighbor of layout.neighbors.get(id) ?? []) {
+          if (!distances.has(neighbor)) {
+            distances.set(neighbor, hop);
+            next.push(neighbor);
+          }
+        }
+      }
+      frontier = next;
+    }
+    return distances;
+  }, [layout, egoCenterId]);
+
   const onRender = useCallback(
     (ctx: CanvasRenderingContext2D, transform: CanvasTransform, size: { width: number; height: number }) => {
       if (!layout) return;
@@ -171,19 +193,21 @@ const NetworkGraph = forwardRef<NetworkGraphHandle, NetworkGraphProps>(function 
       if (id === null) {
         if (hoverCard !== null) setHoverCard(null);
       } else if (hit) {
-        // 同一節點也持續更新位置(讓小卡跟滑鼠),換節點則重新算 neighbor/ring
+        // 同一節點也持續更新位置(讓小卡跟滑鼠),換節點則重新算 neighbor/distance
         const neighborCount = layout.neighbors.get(id)?.size ?? 0;
-        const ring = layout.rings ? (layout.rings.get(id) ?? null) : null;
+        const centerHopDistance = centerHopDistances
+          ? centerHopDistances.get(id)
+          : null;
         setHoverCard({
           node: hit,
           screenX: event.clientX,
           screenY: event.clientY,
           neighborCount,
-          ring,
+          centerHopDistance,
         });
       }
     },
-    [layout, hoverCard],
+    [layout, hoverCard, centerHopDistances],
   );
 
   const onClick = useCallback(
