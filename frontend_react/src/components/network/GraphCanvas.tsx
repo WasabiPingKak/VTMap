@@ -44,6 +44,7 @@ type PointCallback = (worldX: number, worldY: number, event: MouseEvent) => void
 interface GraphCanvasProps {
   onRender?: RenderCallback;
   onHover?: PointCallback;
+  onHoverLeave?: () => void;
   onClick?: PointCallback;
   minZoom?: number;
   maxZoom?: number;
@@ -66,7 +67,7 @@ export interface GraphCanvasHandle {
 }
 
 const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(function GraphCanvas(
-  { onRender, onHover, onClick, minZoom = 0.05, maxZoom = 4 },
+  { onRender, onHover, onHoverLeave, onClick, minZoom = 0.05, maxZoom = 4 },
   ref,
 ) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -80,12 +81,14 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(function Gra
   // callback 走 ref,避免 RAF 內的 stale closure(在 effect 中更新以符合 hooks 規範)
   const onRenderRef = useRef(onRender);
   const onHoverRef = useRef(onHover);
+  const onHoverLeaveRef = useRef(onHoverLeave);
   const onClickRef = useRef(onClick);
   useEffect(() => {
     onRenderRef.current = onRender;
     onHoverRef.current = onHover;
+    onHoverLeaveRef.current = onHoverLeave;
     onClickRef.current = onClick;
-  }, [onRender, onHover, onClick]);
+  }, [onRender, onHover, onHoverLeave, onClick]);
 
   const requestRender = useCallback(() => {
     if (rafRef.current) return;
@@ -199,11 +202,21 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(function Gra
       onClickRef.current?.(w.x, w.y, e);
     };
 
+    const leaveHandler = () => {
+      pendingMove = null;
+      if (moveRafId !== null) {
+        cancelAnimationFrame(moveRafId);
+        moveRafId = null;
+      }
+      onHoverLeaveRef.current?.();
+    };
     canvas.addEventListener("mousemove", moveHandler);
+    canvas.addEventListener("mouseleave", leaveHandler);
     canvas.addEventListener("click", clickHandler);
     return () => {
       if (moveRafId !== null) cancelAnimationFrame(moveRafId);
       canvas.removeEventListener("mousemove", moveHandler);
+      canvas.removeEventListener("mouseleave", leaveHandler);
       canvas.removeEventListener("click", clickHandler);
     };
   }, [screenToWorld]);

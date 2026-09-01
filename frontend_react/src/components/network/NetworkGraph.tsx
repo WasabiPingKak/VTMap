@@ -12,6 +12,7 @@ import {
   useState,
 } from "react";
 import GraphCanvas, { type GraphCanvasHandle, type CanvasTransform } from "./GraphCanvas";
+import HoverCard, { type HoverCardData } from "./HoverCard";
 import { computeLayout } from "./layout";
 import {
   bakeDimLayer,
@@ -50,6 +51,7 @@ const NetworkGraph = forwardRef<NetworkGraphHandle, NetworkGraphProps>(function 
 ) {
   const canvasRef = useRef<GraphCanvasHandle | null>(null);
   const hoveredIdRef = useRef<string | null>(null);
+  const [hoverCard, setHoverCard] = useState<HoverCardData | null>(null);
 
   // Layout 計算改 async(setTimeout 讓 spinner 先繪出),避免第一次進頁凍結 ~700ms。
   // 舊 layout 保留可見直到新的算完(切換 ego 圓心不會閃爍空畫面)。
@@ -160,13 +162,28 @@ const NetworkGraph = forwardRef<NetworkGraphHandle, NetworkGraphProps>(function 
       if (!layout) return;
       const hit = hitTest(layout, x, y);
       const id = hit?.node.channel_id ?? null;
-      if (id !== hoveredIdRef.current) {
+      const idChanged = id !== hoveredIdRef.current;
+      if (idChanged) {
         hoveredIdRef.current = id;
         (event.target as HTMLCanvasElement).style.cursor = id ? "pointer" : "grab";
         canvasRef.current?.requestRender();
       }
+      if (id === null) {
+        if (hoverCard !== null) setHoverCard(null);
+      } else if (hit) {
+        // 同一節點也持續更新位置(讓小卡跟滑鼠),換節點則重新算 neighbor/ring
+        const neighborCount = layout.neighbors.get(id)?.size ?? 0;
+        const ring = layout.rings ? (layout.rings.get(id) ?? null) : null;
+        setHoverCard({
+          node: hit,
+          screenX: event.clientX,
+          screenY: event.clientY,
+          neighborCount,
+          ring,
+        });
+      }
     },
-    [layout],
+    [layout, hoverCard],
   );
 
   const onClick = useCallback(
@@ -281,7 +298,18 @@ const NetworkGraph = forwardRef<NetworkGraphHandle, NetworkGraphProps>(function 
 
   return (
     <>
-      <GraphCanvas ref={canvasRef} onRender={onRender} onHover={onHover} onClick={onClick} />
+      <GraphCanvas
+        ref={canvasRef}
+        onRender={onRender}
+        onHover={onHover}
+        onHoverLeave={() => {
+          hoveredIdRef.current = null;
+          setHoverCard(null);
+          canvasRef.current?.requestRender();
+        }}
+        onClick={onClick}
+      />
+      {hoverCard && <HoverCard info={hoverCard} />}
       {isComputing && (
         <div className="absolute inset-0 flex items-center justify-center bg-slate-950/60 backdrop-blur-sm pointer-events-none z-10">
           <div className="flex flex-col items-center gap-3 text-slate-200">
