@@ -6,6 +6,7 @@ from flask import jsonify, request
 from services.network.graph_service import (
     DEFAULT_RECENT_LIMIT,
     get_network_graph,
+    get_queue_rank,
     get_recent_nodes,
 )
 
@@ -33,6 +34,15 @@ def init_network_route(app):
         except (TypeError, ValueError):
             limit = DEFAULT_RECENT_LIMIT
         payload = get_recent_nodes(limit)
+        return jsonify({"success": True, **payload})
+
+    @bp.route("/api/network/queue-rank/<channel_id>", methods=["GET"])
+    @bp.doc(
+        summary="頻道在爬蟲佇列的累計順位",
+        description="回傳 rank(int)或 null;null 代表沒有 pending task",
+    )
+    def get_rank(channel_id: str):
+        payload = get_queue_rank(channel_id)
         return jsonify({"success": True, **payload})
 
     app.register_blueprint(bp)
