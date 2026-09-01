@@ -353,59 +353,17 @@ function computeEgoRingsPositions(
 }
 
 /**
- * ego 模式 force 佈局:圓心固定 (0,0),其他節點只受 link/charge/collide 拉扯,自然聚合成社群。
- * 沒有環半徑約束、沒有硬性徑向分帶,rings 依 BFS 分色仍有效(hop1/2/3 顏色不變)。
- * 加一股弱重力拉向圓心,避免孤島飛太遠。
+ * ego 模式 force 佈局:直接沿用全圖 FA2 結果(linLog + strongGravity + scalingRatio,
+ * 對節點多、邊密的社群才處理得動;純 d3-force 弱 charge/gravity 對大圖會全部糊一坨)。
+ * computeLayout 之後會 translate 讓圓心位於 (0,0),所以這裡不用自己居中。
+ * rings 依 BFS 分色仍有效(hop1/2/3 顏色不變),tuning 面板參數在這模式不生效。
  */
 function computeEgoForcePositions(
   data: NetworkGraphData,
-  rings: Map<string, number>,
-  metrics: { halfWidth: number }[],
-  tuning: LayoutTuning,
+  useCache: boolean,
 ): { x: number; y: number }[] {
-  const nodeIds = data.nodes.map((n) => n.channel_id);
-  const nodeIdSet = new Set(nodeIds);
-  const simNodes: SimNode[] = data.nodes.map((n) => ({ id: n.channel_id }));
-  const simLinks = data.edges
-    .filter((e) => nodeIdSet.has(e.a) && nodeIdSet.has(e.b))
-    .map((e) => ({ source: e.a, target: e.b }));
-
-  // 初始位置:hop 環當初始半徑,角度 hash,讓 sim 有個合理起點
-  for (const sn of simNodes) {
-    const ring = rings.get(sn.id) ?? EGO_OUTER_RING;
-    if (ring === 0) {
-      sn.fx = 0;
-      sn.fy = 0;
-      continue;
-    }
-    const angle = hashAngle(sn.id);
-    const initRadius = 200 + ring * 150;
-    sn.x = Math.cos(angle) * initRadius;
-    sn.y = Math.sin(angle) * initRadius;
-  }
-
-  const sim = forceSimulation(simNodes)
-    .force(
-      "link",
-      forceLink(simLinks)
-        .id((d) => (d as SimNode).id)
-        .strength(tuning.linkStrength),
-    )
-    .force("charge", forceManyBody().strength(tuning.chargeStrength))
-    .force(
-      "collide",
-      forceCollide(
-        (_d, i) => Math.max(metrics[i].halfWidth, HEX_RADIUS) + tuning.collidePadding,
-      ),
-    )
-    // 弱重力:確保跟圓心無連線的節點不會飄到天邊
-    .force("gravity", forceRadial(0, 0, 0).strength(0.02))
-    .stop();
-
-  const ticks = Math.ceil(Math.log(sim.alphaMin()) / Math.log(1 - sim.alphaDecay()));
-  sim.tick(ticks);
-
-  return simNodes.map((sn) => ({ x: sn.x ?? 0, y: sn.y ?? 0 }));
+  const basis = getGlobalBasis(data, useCache);
+  return basis.positions.map((p) => ({ x: p.x, y: p.y }));
 }
 
 /**
@@ -513,9 +471,10 @@ function computeEgoPositions(
   metrics: { halfWidth: number }[],
   tuning: LayoutTuning,
   mode: EgoLayoutMode,
+  useCache: boolean,
 ): { x: number; y: number }[] {
   if (mode === "force") {
-    return computeEgoForcePositions(data, rings, metrics, tuning);
+    return computeEgoForcePositions(data, useCache);
   }
   if (mode === "sunburst") {
     return computeEgoSunburstPositions(data, rings, halfWidthById);
@@ -625,7 +584,7 @@ export function computeLayout(
   const communities = basis.communities;
 
   const positions = egoActive
-    ? computeEgoPositions(data, rings!, halfWidthById, metrics, tuning, ego!.mode ?? "rings")
+    ? computeEgoPositions(data, rings!, halfWidthById, metrics, tuning, ego!.mode ?? "rings", !measure)
     : basis.positions;
 
   // 矩形分離:保證「節點 + 下方標籤」零重疊
