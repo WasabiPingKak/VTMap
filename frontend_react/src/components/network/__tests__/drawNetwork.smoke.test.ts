@@ -33,8 +33,8 @@ function makeCtx() {
 
 const data: NetworkGraphData = {
   nodes: [
-    { channel_id: "UC_a", title: "頻道A", handle: "@a", thumbnail: null, in_vtmap: true },
-    { channel_id: "UC_b", title: "頻道B", handle: "@b", thumbnail: null, in_vtmap: false },
+    { channel_id: "UC_a", title: "頻道A", handle: "@a", thumbnail: null, in_vtmap: true, subscriber_count: null, scanned: true },
+    { channel_id: "UC_b", title: "頻道B", handle: "@b", thumbnail: null, in_vtmap: false, subscriber_count: null, scanned: true },
   ],
   edges: [{ a: "UC_a", b: "UC_b", evidence_count: 1, last_seen_video_at: null, evidence: [] }],
 };

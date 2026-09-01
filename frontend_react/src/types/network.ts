@@ -6,6 +6,11 @@ export interface NetworkNode {
   handle: string | null;
   thumbnail: string | null;
   in_vtmap: boolean;
+  /** YouTube 訂閱數;null = 尚未取得或頻道隱藏訂閱數 */
+  subscriber_count: number | null;
+  /** 是否曾被當成 host 掃過(有觀察紀錄以他為 host)。
+   *  false 代表這個節點只是別人直播裡出現過,我們還沒去讀他自己的直播,連線數會偏少。 */
+  scanned: boolean;
 }
 
 export interface EdgeEvidence {

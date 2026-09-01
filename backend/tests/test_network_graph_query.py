@@ -10,8 +10,8 @@ TS = datetime(2026, 8, 28, 12, 0, 0)
 
 def test_build_graph_payload_assembles_nodes_edges_evidence():
     node_rows = [
-        ("UC_a", "頻道A", "@ch_a", "https://img/a.jpg", True),
-        ("UC_b", None, "@ch_b", None, False),
+        ("UC_a", "頻道A", "@ch_a", "https://img/a.jpg", True, 12345, True),
+        ("UC_b", None, "@ch_b", None, False, None, False),
     ]
     edge_rows = [("UC_a", "UC_b", 2, TS)]
     evidence_rows = [
@@ -28,9 +28,14 @@ def test_build_graph_payload_assembles_nodes_edges_evidence():
         "handle": "@ch_a",
         "thumbnail": "https://img/a.jpg",
         "in_vtmap": True,
+        "subscriber_count": 12345,
+        "scanned": True,
     }
     assert payload["nodes"][1]["title"] is None
     assert payload["nodes"][1]["handle"] == "@ch_b"
+    # 訂閱數 null 直接傳,前端會顯示「訂閱數還沒整理」;scanned=false 讓前端顯示「等待掃描」
+    assert payload["nodes"][1]["subscriber_count"] is None
+    assert payload["nodes"][1]["scanned"] is False
 
     assert len(payload["edges"]) == 1
     edge = payload["edges"][0]

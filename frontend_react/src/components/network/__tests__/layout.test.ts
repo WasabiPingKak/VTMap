@@ -4,9 +4,9 @@ import type { NetworkGraphData } from "@/types/network";
 
 const data: NetworkGraphData = {
   nodes: [
-    { channel_id: "UC_a", title: "A", handle: null, thumbnail: null, in_vtmap: true },
-    { channel_id: "UC_b", title: "B", handle: null, thumbnail: null, in_vtmap: false },
-    { channel_id: "UC_c", title: "C", handle: null, thumbnail: null, in_vtmap: true },
+    { channel_id: "UC_a", title: "A", handle: null, thumbnail: null, in_vtmap: true, subscriber_count: null, scanned: true },
+    { channel_id: "UC_b", title: "B", handle: null, thumbnail: null, in_vtmap: false, subscriber_count: null, scanned: true },
+    { channel_id: "UC_c", title: "C", handle: null, thumbnail: null, in_vtmap: true, subscriber_count: null, scanned: true },
   ],
   edges: [
     { a: "UC_a", b: "UC_b", evidence_count: 2, last_seen_video_at: null, evidence: [] },
@@ -56,7 +56,7 @@ describe("computeLayout", () => {
 
   it("忽略指向不存在節點的邊", () => {
     const layout = computeLayout({
-      nodes: [{ channel_id: "UC_a", title: "A", handle: null, thumbnail: null, in_vtmap: true }],
+      nodes: [{ channel_id: "UC_a", title: "A", handle: null, thumbnail: null, in_vtmap: true, subscriber_count: null, scanned: true }],
       edges: [{ a: "UC_a", b: "UC_ghost", evidence_count: 1, last_seen_video_at: null, evidence: [] }],
     });
     expect(layout.edges).toHaveLength(0);
@@ -75,6 +75,8 @@ describe("computeLayout", () => {
       handle: null,
       thumbnail: null,
       in_vtmap: true,
+      subscriber_count: null,
+      scanned: true,
     }));
     const edges = nodes.slice(1).map((n) => ({
       a: "UC_0",
@@ -111,6 +113,8 @@ describe("computeLayout ego 模式", () => {
       handle: null,
       thumbnail: null,
       in_vtmap: true,
+      subscriber_count: null,
+      scanned: true,
     })),
     edges: [
       { a: "UC_A", b: "UC_B", evidence_count: 1, last_seen_video_at: null, evidence: [] },
@@ -156,6 +160,8 @@ describe("computeLayout ego 模式", () => {
       handle: null,
       thumbnail: null,
       in_vtmap: true,
+      subscriber_count: null,
+      scanned: true,
     }));
     const edges = nodes.slice(1, 9).map((n) => ({
       a: "UC_0",

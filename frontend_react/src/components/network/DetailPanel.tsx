@@ -7,6 +7,19 @@ import { Crosshair, X } from "lucide-react";
 import type { NetworkEdge, NetworkGraphData, NetworkNode } from "@/types/network";
 import { channelDisplayName, channelInitial } from "./displayName";
 
+/** 訂閱數格式:
+ *  < 1 萬 → 原始數字加千分位;
+ *  1 萬 ~ 9.9 萬 → 一位小數的萬(例:5.4 萬);
+ *  ≥ 10 萬 → 整數萬(例:120 萬)。
+ *  null → 明確標示還沒抓,不用「不公開」這種含糊字。 */
+function formatSubscribers(count: number | null): string {
+  if (count === null) return "訂閱數還沒整理";
+  if (count < 10000) return `${count.toLocaleString("zh-TW")} 人訂閱`;
+  const wan = count / 10000;
+  const display = wan < 10 ? wan.toFixed(1) : Math.round(wan).toLocaleString("zh-TW");
+  return `${display} 萬人訂閱`;
+}
+
 interface DetailPanelProps {
   data: NetworkGraphData;
   focusedId: string;
@@ -74,7 +87,7 @@ export default function DetailPanel({
           <div className="font-bold truncate">{channelDisplayName(channel)}</div>
           <div className="text-xs text-slate-400 mt-0.5">
             {channel.title && channel.handle && <span className="mr-2">{channel.handle}</span>}
-            {channel.in_vtmap ? "VTMap 收錄頻道" : "尚未收錄"}
+            {formatSubscribers(channel.subscriber_count)}
           </div>
           <a
             href={`https://www.youtube.com/channel/${channel.channel_id}`}
@@ -104,6 +117,16 @@ export default function DetailPanel({
           <X size={18} />
         </button>
       </div>
+
+      {/* 等待掃描提示:讓看到「連線這麼少?」的路人知道原因是資料還沒讀完 */}
+      {!channel.scanned && (
+        <div className="mx-4 mt-3 rounded-md border border-amber-800/60 bg-amber-950/40 px-3 py-2 text-xs text-amber-200">
+          <div className="font-medium mb-0.5">等待掃描</div>
+          <div className="text-amber-200/80">
+            這個頻道自己的直播還沒讀,關係之後會補上
+          </div>
+        </div>
+      )}
 
       {/* 關係清單 */}
       <div className="flex-1 overflow-y-auto p-4 space-y-4">

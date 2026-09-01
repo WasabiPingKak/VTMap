@@ -7,9 +7,16 @@
 from datetime import datetime
 from typing import Any
 
-# 出現在任一條邊上的頻道(圖的節點)
+# 出現在任一條邊上的頻道(圖的節點)。
+# scanned = 這個頻道曾被當成 host 掃過至少一次(有人在他的直播裡被記錄過);
+# 用來讓前端可以標出「等待掃描」節點,避免熟人看到連線數少誤以為圖漏了東西。
 NODES_SQL = """
-select c.channel_id, c.title, c.handle, c.thumbnail_url, c.in_vtmap
+select c.channel_id, c.title, c.handle, c.thumbnail_url, c.in_vtmap,
+       c.subscriber_count,
+       exists (
+         select 1 from chat_badge_observations o
+         where o.host_channel_id = c.channel_id
+       ) as scanned
 from channels c
 where c.channel_id in (
   select channel_a from network_edges
@@ -74,8 +81,10 @@ def build_graph_payload(
             "handle": handle,
             "thumbnail": thumbnail_url,
             "in_vtmap": bool(in_vtmap),
+            "subscriber_count": int(subscriber_count) if subscriber_count is not None else None,
+            "scanned": bool(scanned),
         }
-        for channel_id, title, handle, thumbnail_url, in_vtmap in node_rows
+        for channel_id, title, handle, thumbnail_url, in_vtmap, subscriber_count, scanned in node_rows
     ]
 
     return {"nodes": nodes, "edges": list(edges.values())}
