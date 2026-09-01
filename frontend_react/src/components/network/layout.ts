@@ -44,6 +44,34 @@ export interface EgoOptions {
   centerId: string;
 }
 
+/** ego 模式可從 UI 微調的 layout 參數,全部保留現行預設值 */
+export interface LayoutTuning {
+  /** forceLink 強度(0.01–1.0),控制有邊節點的互拉 */
+  linkStrength: number;
+  /** forceManyBody 強度(-1000 到 -50),越負互斥越強 */
+  chargeStrength: number;
+  /** forceRadial 強度(0.1–2.0),hop1/hop2 環半徑錨定強度 */
+  radialStrength: number;
+  /** forceCollide 額外 padding(0–50px),節點+標籤最小間距 */
+  collidePadding: number;
+  /** 環與環的最小間距(0–200px) */
+  bandGap: number;
+  /** hop1 半徑上限的倍率(乘上 ringRadii[1],0.5–2.0) */
+  hop1CapMultiplier: number;
+  /** hop2 半徑上限的倍率(乘上 ringRadii[2],0.5–2.0) */
+  hop2CapMultiplier: number;
+}
+
+export const DEFAULT_TUNING: LayoutTuning = {
+  linkStrength: 0.1,
+  chargeStrength: -220,
+  radialStrength: 0.9,
+  collidePadding: 12,
+  bandGap: 60,
+  hop1CapMultiplier: 1,
+  hop2CapMultiplier: 1,
+};
+
 /** 外圍(與圓心兩層內無關)的環編號 */
 export const EGO_OUTER_RING = 3;
 
@@ -199,6 +227,7 @@ function computeEgoPositions(
   rings: Map<string, number>,
   halfWidthById: Map<string, number>,
   metrics: { halfWidth: number }[],
+  tuning: LayoutTuning,
 ): { x: number; y: number }[] {
   const nodeIds = data.nodes.map((n) => n.channel_id);
   const ringRadii = computeRingRadii(rings, halfWidthById);
@@ -228,17 +257,20 @@ function computeEgoPositions(
     sn.y = Math.sin(angle) * ringRadii[ring];
   }
 
+  const outerRadialStrength = tuning.radialStrength * (0.5 / 0.9); // 保持外圍相對比例
   const sim = forceSimulation(simNodes)
     .force(
       "link",
       forceLink(simLinks)
         .id((d) => (d as SimNode).id)
-        .strength(0.1),
+        .strength(tuning.linkStrength),
     )
-    .force("charge", forceManyBody().strength(-220))
+    .force("charge", forceManyBody().strength(tuning.chargeStrength))
     .force(
       "collide",
-      forceCollide((_d, i) => Math.max(metrics[i].halfWidth, HEX_RADIUS) + 12),
+      forceCollide(
+        (_d, i) => Math.max(metrics[i].halfWidth, HEX_RADIUS) + tuning.collidePadding,
+      ),
     )
     .force(
       "radial",
@@ -246,7 +278,11 @@ function computeEgoPositions(
         (d) => ringRadii[rings.get((d as SimNode).id)!],
         0,
         0,
-      ).strength((d) => (rings.get((d as SimNode).id)! >= EGO_OUTER_RING ? 0.5 : 0.9)),
+      ).strength((d) =>
+        rings.get((d as SimNode).id)! >= EGO_OUTER_RING
+          ? outerRadialStrength
+          : tuning.radialStrength,
+      ),
     )
     .stop();
 
@@ -256,8 +292,8 @@ function computeEgoPositions(
   // 硬性徑向分帶:sim 決定角度,再依環別把 hop1/hop2 壓回上限、hop2/outer 推出下限,
   // 確保 hop1(綠)與 hop2(藍)各自都在對應圓周內(不會被 link 力拉到天邊),
   // 且 hop1 < hop2 < outer 三環嚴格分離。
-  const BAND_GAP = 60;
-  const hop1Cap = ringRadii[1];
+  const BAND_GAP = tuning.bandGap;
+  const hop1Cap = ringRadii[1] * tuning.hop1CapMultiplier;
   let maxHop1 = 0;
   for (const sn of simNodes) {
     if (rings.get(sn.id) !== 1) continue;
@@ -271,7 +307,7 @@ function computeEgoPositions(
     if (newR > maxHop1) maxHop1 = newR;
   }
   const hop2Floor = maxHop1 + BAND_GAP;
-  const hop2Cap = ringRadii[2];
+  const hop2Cap = ringRadii[2] * tuning.hop2CapMultiplier;
   let maxHop2 = 0;
   for (const sn of simNodes) {
     if (rings.get(sn.id) !== 2) continue;
@@ -389,6 +425,7 @@ export function computeLayout(
   data: NetworkGraphData,
   measure?: MeasureFn,
   ego?: EgoOptions,
+  tuning: LayoutTuning = DEFAULT_TUNING,
 ): GraphLayout {
   const layoutStart =
     typeof performance !== "undefined" ? performance.now() : 0;
@@ -405,7 +442,7 @@ export function computeLayout(
   const communities = basis.communities;
 
   const positions = egoActive
-    ? computeEgoPositions(data, rings!, halfWidthById, metrics)
+    ? computeEgoPositions(data, rings!, halfWidthById, metrics, tuning)
     : basis.positions;
 
   // 矩形分離:保證「節點 + 下方標籤」零重疊

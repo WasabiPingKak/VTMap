@@ -3,7 +3,7 @@
  * 所有 UI 都是懸浮在圖上的元件,唯一的離開路徑是左上角「回 VTMap」按鈕。
  */
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { FaClipboardList, FaInfoCircle } from "react-icons/fa";
 import { ArrowLeft, LocateFixed } from "lucide-react";
@@ -12,10 +12,27 @@ import DetailPanel from "@/components/network/DetailPanel";
 import NetworkToolbar from "@/components/network/NetworkToolbar";
 import NetworkLegend from "@/components/network/NetworkLegend";
 import RecentNodesPanel from "@/components/network/RecentNodesPanel";
+import TuningPanel from "@/components/network/TuningPanel";
+import { DEFAULT_TUNING, type LayoutTuning } from "@/components/network/layout";
 import { useNetworkGraph } from "@/hooks/useNetworkGraph";
 import { useMyChannelId } from "@/hooks/useMyChannelId";
 
 const PANEL_INSET = 340;
+const TUNING_STORAGE_KEY = "vtmap.network.tuning.v1";
+const TUNING_DEBOUNCE_MS = 300;
+
+function loadStoredTuning(): LayoutTuning {
+  if (typeof window === "undefined") return DEFAULT_TUNING;
+  try {
+    const raw = window.localStorage.getItem(TUNING_STORAGE_KEY);
+    if (!raw) return DEFAULT_TUNING;
+    const parsed = JSON.parse(raw) as Partial<LayoutTuning>;
+    // 缺欄位用預設補齊,防止舊版 storage 少欄位
+    return { ...DEFAULT_TUNING, ...parsed };
+  } catch {
+    return DEFAULT_TUNING;
+  }
+}
 
 export default function NetworkPage() {
   const { data, isLoading, isError } = useNetworkGraph();
@@ -24,6 +41,19 @@ export default function NetworkPage() {
   const graphRef = useRef<NetworkGraphHandle | null>(null);
   const [showInfo, setShowInfo] = useState(false);
   const [showRecent, setShowRecent] = useState(false);
+  const [showTuning, setShowTuning] = useState(false);
+  // 兩份 tuning:編輯用即時更新面板 UI,committed 延遲 300ms 才觸發 re-layout
+  const [tuning, setTuning] = useState<LayoutTuning>(loadStoredTuning);
+  const [committedTuning, setCommittedTuning] = useState<LayoutTuning>(tuning);
+  useEffect(() => {
+    const t = window.setTimeout(() => setCommittedTuning(tuning), TUNING_DEBOUNCE_MS);
+    try {
+      window.localStorage.setItem(TUNING_STORAGE_KEY, JSON.stringify(tuning));
+    } catch {
+      // localStorage 滿了或被 disable,忽略
+    }
+    return () => window.clearTimeout(t);
+  }, [tuning]);
 
   const focusedId = searchParams.get("focus");
   const centerId = searchParams.get("center");
@@ -95,6 +125,7 @@ export default function NetworkPage() {
             egoCenterId={centerId}
             onFocusChange={setFocus}
             panelInset={focusedId ? PANEL_INSET : 0}
+            tuning={committedTuning}
           />
           <NetworkToolbar
             data={data}
@@ -103,7 +134,15 @@ export default function NetworkPage() {
             onZoomOut={() => graphRef.current?.zoomOut()}
             onFitAll={() => graphRef.current?.fitAll()}
             onOpenRecent={() => setShowRecent(true)}
+            onToggleTuning={() => setShowTuning((v) => !v)}
           />
+          {showTuning && (
+            <TuningPanel
+              tuning={tuning}
+              onChange={setTuning}
+              onClose={() => setShowTuning(false)}
+            />
+          )}
           <NetworkLegend />
           {/* 上方中央:圓心 pill + 定位按鈕(從左工具列搬過來,語意上跟圓心/選取狀態綁在一起)*/}
           <div className="absolute top-3 left-1/2 -translate-x-1/2 z-10 flex flex-col items-center gap-2">
