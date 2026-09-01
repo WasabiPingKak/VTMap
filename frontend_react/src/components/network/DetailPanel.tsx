@@ -111,7 +111,7 @@ export default function DetailPanel({
         <div className="mx-4 mt-3 rounded-md border border-amber-800/60 bg-amber-950/40 px-3 py-2 text-xs text-amber-200">
           <div className="font-medium mb-0.5">等待掃描</div>
           <div className="text-amber-200/80">
-            這個頻道自己的直播還沒讀,關係之後會補上
+            此頻道的關係資料尚在蒐集中
           </div>
         </div>
       )}
