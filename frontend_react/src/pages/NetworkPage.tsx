@@ -90,14 +90,19 @@ export default function NetworkPage() {
 
   const centerNode = centerId ? data?.nodes.find((n) => n.channel_id === centerId) : null;
 
-  // 定位:圓心 > 選取節點 > 自己的頻道(已登入且在圖上)> 顯示全圖
+  // 定位:若有選取節點,同時把它設為圓心(layout 重算後 ego 效果自動 fit);
+  //       否則優先圓心 > 自己的頻道 > 顯示全圖。
   const handleLocate = useCallback(() => {
+    if (focusedId && focusedId !== centerId) {
+      setCenter(focusedId);
+      return;
+    }
     const candidates = [centerId, focusedId, me?.channelId];
     for (const id of candidates) {
       if (id && graphRef.current?.panToNode(id)) return;
     }
     graphRef.current?.fitAll();
-  }, [centerId, focusedId, me?.channelId]);
+  }, [centerId, focusedId, me?.channelId, setCenter]);
 
   return (
     <div className="fixed inset-0 overflow-hidden bg-[#080d15]">
@@ -126,6 +131,7 @@ export default function NetworkPage() {
             onFocusChange={setFocus}
             panelInset={focusedId ? PANEL_INSET : 0}
             tuning={committedTuning}
+            myChannelId={me?.channelId ?? null}
           />
           <NetworkToolbar
             data={data}
@@ -161,7 +167,7 @@ export default function NetworkPage() {
             <button
               onClick={handleLocate}
               aria-label="定位"
-              title="定位到選取/圓心/自己的頻道"
+              title="定位:有選取則設為圓心,否則到現有圓心或自己的頻道"
               className="p-2 rounded-lg bg-slate-950/80 backdrop-blur border border-slate-800 text-slate-300 hover:text-white hover:bg-slate-800"
             >
               <LocateFixed size={16} />
