@@ -113,8 +113,6 @@ export interface RenderState {
   /** 4 層邊(base/baseHop1/baseHop2/dim)的預烘結果;各層有 canvas 就走 drawImage,
    *  沒有(fallback:超尺寸/建立失敗)就走原本 per-widthBucket stroke */
   bakedEdgeLayers?: BakedEdgeLayers | null;
-  /** 使用者自己的 channel id;非 null 時該節點會有金色脈動光暈 */
-  myChannelId?: string | null;
 }
 
 export function createStarField(count = 260, spread = 2600) {
@@ -1104,15 +1102,16 @@ export function drawNetwork(
   }
   ctx.globalAlpha = 1;
 
-  // ── 自己的節點:金色脈動光暈(兩層 sonar ping 交錯,1.5s 一輪)──
-  if (state.myChannelId) {
-    const meNode = state.layout.byId.get(state.myChannelId);
+  // ── ego 圓心:金色脈動光暈(兩層 sonar ping 交錯,1.5s 一輪)──
+  const centerId = state.layout.egoCenterId;
+  if (centerId) {
+    const centerNode = state.layout.byId.get(centerId);
     if (
-      meNode &&
-      meNode.x > viewMinX &&
-      meNode.x < viewMaxX &&
-      meNode.y > viewMinY &&
-      meNode.y < viewMaxY
+      centerNode &&
+      centerNode.x > viewMinX &&
+      centerNode.x < viewMaxX &&
+      centerNode.y > viewMinY &&
+      centerNode.y < viewMaxY
     ) {
       const phase = (performance.now() / 1500) % 1;
       ctx.strokeStyle = FOCUSED_COLOR;
@@ -1121,7 +1120,7 @@ export function drawNetwork(
         const p = (phase + i * 0.5) % 1;
         const radius = HEX_RADIUS + 2 + p * 18;
         ctx.globalAlpha = (1 - p) * 0.7;
-        hexPath(ctx, meNode.x, meNode.y, radius);
+        hexPath(ctx, centerNode.x, centerNode.y, radius);
         ctx.stroke();
       }
       ctx.globalAlpha = 1;

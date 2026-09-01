@@ -37,8 +37,6 @@ interface NetworkGraphProps {
   panelInset?: number;
   /** ego 模式 layout 微調參數;省略 = 用預設值 */
   tuning?: LayoutTuning;
-  /** 使用者自己的 channel id;該節點會有金色脈動光暈 */
-  myChannelId?: string | null;
 }
 
 export interface NetworkGraphHandle {
@@ -50,7 +48,7 @@ export interface NetworkGraphHandle {
 }
 
 const NetworkGraph = forwardRef<NetworkGraphHandle, NetworkGraphProps>(function NetworkGraph(
-  { data, focusedId, egoCenterId, onFocusChange, panelInset = 0, tuning = DEFAULT_TUNING, myChannelId = null },
+  { data, focusedId, egoCenterId, onFocusChange, panelInset = 0, tuning = DEFAULT_TUNING },
   ref,
 ) {
   const canvasRef = useRef<GraphCanvasHandle | null>(null);
@@ -176,13 +174,12 @@ const NetworkGraph = forwardRef<NetworkGraphHandle, NetworkGraphProps>(function 
         starField,
         requestImage,
         requestRepaint: () => canvasRef.current?.requestRender(),
-        myChannelId,
         bakedDimLayer,
         bakedEdgeLayers,
       };
       drawNetwork(ctx, transform, size.width, size.height, state);
     },
-    [layout, hopDistances, starField, imagesRef, requestImage, bakedDimLayer, bakedEdgeLayers, myChannelId],
+    [layout, hopDistances, starField, imagesRef, requestImage, bakedDimLayer, bakedEdgeLayers],
   );
 
   const onHover = useCallback(
