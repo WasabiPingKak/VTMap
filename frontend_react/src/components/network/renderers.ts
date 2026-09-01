@@ -494,6 +494,26 @@ const labelSpriteCache = new Map<string, HTMLCanvasElement | null>();
 const LABEL_SPRITE_SCALE = 2;
 const LABEL_SPRITE_PAD = 4;
 
+/**
+ * layout 邊界主動修剪:layout 換掉時把不再屬於當前節點集的 sprite key 全部刪掉。
+ * node/label sprite key 的第一段都是 channel_id(pipe 分隔),
+ * 只掃 key 字串起始到第一個 '|',不切字串陣列以節省 gc。
+ * 沒這個 hook,cache 只等湊滿 MAX_SPRITE_CACHE=6000 才整批 clear,
+ * HMR / 頻繁切 ego 圓心會累積用不到的舊 sprite。
+ */
+export function pruneNodeSpriteCaches(activeChannelIds: Set<string>) {
+  const isActive = (key: string) => {
+    const pipe = key.indexOf("|");
+    return activeChannelIds.has(pipe === -1 ? key : key.slice(0, pipe));
+  };
+  for (const key of nodeSpriteCache.keys()) {
+    if (!isActive(key)) nodeSpriteCache.delete(key);
+  }
+  for (const key of labelSpriteCache.keys()) {
+    if (!isActive(key)) labelSpriteCache.delete(key);
+  }
+}
+
 function getLabelSprite(node: LayoutNode, bucket: number): HTMLCanvasElement | null {
   const key = `${node.node.channel_id}|${bucket}`;
   const cached = labelSpriteCache.get(key);

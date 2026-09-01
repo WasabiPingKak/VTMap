@@ -19,6 +19,7 @@ import {
   createStarField,
   drawNetwork,
   hitTest,
+  pruneNodeSpriteCaches,
   type BakedDimLayer,
   type RenderState,
 } from "./renderers";
@@ -64,6 +65,9 @@ const NetworkGraph = forwardRef<NetworkGraphHandle, NetworkGraphProps>(function 
         undefined,
         egoCenterId ? { centerId: egoCenterId } : undefined,
       );
+      // 主動修剪 module-level sprite 快取:切 ego 圓心 / 資料換版時,
+      // 舊節點的 sprite key 不會被自然命中,留著只等湊滿上限才 clear。
+      pruneNodeSpriteCaches(new Set(next.nodes.map((n) => n.node.channel_id)));
       setLayout(next);
       setIsComputing(false);
     }, 30);
@@ -187,6 +191,7 @@ const NetworkGraph = forwardRef<NetworkGraphHandle, NetworkGraphProps>(function 
       canvasRef.current?.requestRender();
       requestAnimationFrame(loop);
     };
+    let innerTimer: ReturnType<typeof setTimeout> | null = null;
     const timer = setTimeout(() => {
       let hub = layout.nodes[0];
       let bestDegree = -1;
@@ -198,12 +203,13 @@ const NetworkGraph = forwardRef<NetworkGraphHandle, NetworkGraphProps>(function 
         }
       }
       canvasRef.current?.panTo(hub.x, hub.y, Number(params.get("benchzoom")) || 1);
-      setTimeout(() => requestAnimationFrame(loop), 1500);
+      innerTimer = setTimeout(() => requestAnimationFrame(loop), 1500);
     }, 5000);
     return () => {
       benchArmed.current = false;
       running = false;
       clearTimeout(timer);
+      if (innerTimer !== null) clearTimeout(innerTimer);
     };
   }, [layout]);
 
