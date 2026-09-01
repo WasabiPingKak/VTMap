@@ -814,11 +814,9 @@ export function drawNetwork(
     if (highlightId) {
       const related = layout.edgesByNode.get(highlightId);
       if (related && related.length) {
-        const rings = layout.rings;
         const overlayGroups = new Map<number, Path2D>();
         for (const le of related) {
-          // ego 模式下與外圍相關的邊 alpha 永遠 0.05,不 highlight(維持原視覺規則)
-          if (rings && le.egoDim > 0) continue;
+          // hover/focus 節點的所有連線都要高亮,包含通往外圍的邊(不再依 egoDim 過濾)
           let p = overlayGroups.get(le.widthBucket);
           if (!p) {
             p = new Path2D();
@@ -842,14 +840,18 @@ export function drawNetwork(
     ctx.strokeStyle = EDGE_COLOR;
     const edgeAlpha = (edgeA: string, edgeB: string): number => {
       let alpha = EDGE_ALPHA;
+      let isHighlighted = false;
       if (state.highlightIds !== null) {
         const onFocus =
           state.focusedId !== null && (edgeA === state.focusedId || edgeB === state.focusedId);
         alpha = onFocus ? EDGE_HIGHLIGHT_ALPHA : EDGE_DIM_ALPHA;
+        isHighlighted = onFocus;
       } else if (state.hoveredId && (edgeA === state.hoveredId || edgeB === state.hoveredId)) {
         alpha = EDGE_HIGHLIGHT_ALPHA;
+        isHighlighted = true;
       }
-      if (isEgoOuter(state, edgeA) || isEgoOuter(state, edgeB)) {
+      // 通往外圍的邊平時淡化,但如果一端正是 hover/focus 節點,保留高亮
+      if (!isHighlighted && (isEgoOuter(state, edgeA) || isEgoOuter(state, edgeB))) {
         alpha = Math.min(alpha, EDGE_DIM_ALPHA);
       }
       return alpha;
