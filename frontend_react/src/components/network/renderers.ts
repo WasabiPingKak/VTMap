@@ -69,15 +69,25 @@ export interface BakedDimLayer {
   worldH: number;
 }
 
-/** dim 邊層的預烘 offscreen canvas(ego 模式用):
- *  - canvas 涵蓋所有外圍相關(egoDim>0)邊的 AABB
- *  - 每幀單一 drawImage 取代 per-widthBucket 的 Path2D stroke,GPU 端省下大量 bezier 光柵化 */
-export interface BakedDimEdgeLayer {
+/** 單一邊層的預烘 offscreen canvas:
+ *  - canvas 涵蓋該層所有邊的 AABB
+ *  - 每幀 drawImage 一次取代 per-widthBucket 的 Path2D stroke,
+ *    GPU 端把「上千條 bezier 光柵化」壓縮成「一次紋理採樣」 */
+export interface BakedEdgeCanvas {
   canvas: HTMLCanvasElement;
   worldX: number;
   worldY: number;
   worldW: number;
   worldH: number;
+}
+
+/** 四種邊層(對應 bakedEdges.base/baseHop1/baseHop2/dim)各自的 bake。
+ *  null 表示該層無邊或超尺寸,渲染時 fallback 到 per-widthBucket stroke。 */
+export interface BakedEdgeLayers {
+  base: BakedEdgeCanvas | null;
+  baseHop1: BakedEdgeCanvas | null;
+  baseHop2: BakedEdgeCanvas | null;
+  dim: BakedEdgeCanvas | null;
 }
 
 export interface RenderState {
@@ -96,8 +106,9 @@ export interface RenderState {
   requestRepaint?: () => void;
   /** dim 節點層預烘結果;有值時節點迴圈跳過 dim 節點的 sprite drawImage,改成整層 blit */
   bakedDimLayer?: BakedDimLayer | null;
-  /** dim 邊層預烘結果;有值時跳過 per-widthBucket 的 stroke(path),改成整層 blit */
-  bakedDimEdgeLayer?: BakedDimEdgeLayer | null;
+  /** 4 層邊(base/baseHop1/baseHop2/dim)的預烘結果;各層有 canvas 就走 drawImage,
+   *  沒有(fallback:超尺寸/建立失敗)就走原本 per-widthBucket stroke */
+  bakedEdgeLayers?: BakedEdgeLayers | null;
 }
 
 export function createStarField(count = 260, spread = 2600) {
@@ -294,9 +305,14 @@ function drawNodeShape(
 }
 
 /** 每邊最大 offscreen canvas 尺寸(GPU / 記憶體上限考量;超過 fallback 走 per-frame) */
-const DIM_LAYER_MAX_PX = 4096;
-/** dim 層 bake 的解析度(每世界單位對應多少 canvas 像素) */
-const DIM_LAYER_PX_PER_WORLD = 1;
+const EDGE_BAKE_MAX_PX = 4096;
+/** 邊層 bake 的解析度(每世界單位對應多少 canvas 像素) */
+const EDGE_BAKE_PX_PER_WORLD = 1;
+/** bake 時的 AABB pad,涵蓋 bezier 控制點外凸與線寬本身 */
+const EDGE_BAKE_PAD = 40;
+/** dim 節點層 bake 的解析度與尺寸上限沿用邊層設定 */
+const DIM_LAYER_MAX_PX = EDGE_BAKE_MAX_PX;
+const DIM_LAYER_PX_PER_WORLD = EDGE_BAKE_PX_PER_WORLD;
 
 /**
  * 把 ego 模式下所有 dim(EGO_OUTER_RING)節點的 sprite 烘進單一 offscreen canvas。
@@ -361,39 +377,47 @@ export function bakeDimLayer(
  */
 const DIM_EDGE_BAKE_LINE_WIDTH = 1.5;
 
+interface EdgeAABB {
+  minX: number;
+  minY: number;
+  maxX: number;
+  maxY: number;
+  has: boolean;
+}
+
+function emptyAABB(): EdgeAABB {
+  return { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity, has: false };
+}
+
+function extendAABB(a: EdgeAABB, le: LayoutEdge) {
+  a.has = true;
+  if (le.boxMinX < a.minX) a.minX = le.boxMinX;
+  if (le.boxMinY < a.minY) a.minY = le.boxMinY;
+  if (le.boxMaxX > a.maxX) a.maxX = le.boxMaxX;
+  if (le.boxMaxY > a.maxY) a.maxY = le.boxMaxY;
+}
+
 /**
- * 把 ego 模式下所有 dim(egoDim>0)邊的曲線烘進單一 offscreen canvas。
- * 每幀渲染時 drawImage 一次覆蓋所有 dim 邊,取代 per-widthBucket 的 stroke(數個到十幾個 GPU submit 省成一次)。
- * 超過尺寸上限則回傳 null,渲染 fallback 走原本的 Path2D stroke。
+ * 對一組(widthBucket → Path2D)烘一張 offscreen canvas 並回傳。
+ * 邊寬 = widthBucket(世界單位;canvas 1 px/world → 也就是 canvas 像素),
+ * blit 時線寬會隨縮放線性變化(zoom in 較粗、zoom out 較細),換取 per-frame O(1) stroke。
+ * 若 lineWidthOverride 給值,則所有 bucket 都用該固定寬度(dim 層用來壓細)。
+ * alpha 一律 bake 1.0,實際淡化由 blit 時 globalAlpha 一次套用。
  */
-export function bakeDimEdgeLayer(layout: GraphLayout): BakedDimEdgeLayer | null {
+function bakeEdgeGroup(
+  paths: Map<number, Path2D>,
+  aabb: EdgeAABB,
+  strokeColor: string,
+  lineWidthOverride: number | null,
+): BakedEdgeCanvas | null {
   if (typeof document === "undefined") return null;
-  const bakedDim = layout.bakedEdges?.dim;
-  if (!bakedDim || bakedDim.size === 0) return null;
+  if (!aabb.has || paths.size === 0) return null;
 
-  // AABB 從 dim 邊(egoDim>0)的 boxMin/Max 取,不掃 base 邊
-  let minX = Infinity;
-  let minY = Infinity;
-  let maxX = -Infinity;
-  let maxY = -Infinity;
-  let hasAny = false;
-  for (const le of layout.edges) {
-    if (le.egoDim === 0) continue;
-    hasAny = true;
-    if (le.boxMinX < minX) minX = le.boxMinX;
-    if (le.boxMinY < minY) minY = le.boxMinY;
-    if (le.boxMaxX > maxX) maxX = le.boxMaxX;
-    if (le.boxMaxY > maxY) maxY = le.boxMaxY;
-  }
-  if (!hasAny) return null;
-
-  // pad 涵蓋 bezier 控制點外凸 + 線寬本身
-  const pad = 40;
-  const worldW = maxX - minX + pad * 2;
-  const worldH = maxY - minY + pad * 2;
-  const canvasW = Math.ceil(worldW * DIM_LAYER_PX_PER_WORLD);
-  const canvasH = Math.ceil(worldH * DIM_LAYER_PX_PER_WORLD);
-  if (canvasW > DIM_LAYER_MAX_PX || canvasH > DIM_LAYER_MAX_PX) return null;
+  const worldW = aabb.maxX - aabb.minX + EDGE_BAKE_PAD * 2;
+  const worldH = aabb.maxY - aabb.minY + EDGE_BAKE_PAD * 2;
+  const canvasW = Math.ceil(worldW * EDGE_BAKE_PX_PER_WORLD);
+  const canvasH = Math.ceil(worldH * EDGE_BAKE_PX_PER_WORLD);
+  if (canvasW > EDGE_BAKE_MAX_PX || canvasH > EDGE_BAKE_MAX_PX) return null;
 
   const canvas = document.createElement("canvas");
   canvas.width = Math.max(canvasW, 1);
@@ -401,16 +425,68 @@ export function bakeDimEdgeLayer(layout: GraphLayout): BakedDimEdgeLayer | null 
   const ctx = canvas.getContext("2d");
   if (!ctx) return null;
 
-  ctx.scale(DIM_LAYER_PX_PER_WORLD, DIM_LAYER_PX_PER_WORLD);
-  ctx.translate(-minX + pad, -minY + pad);
-  ctx.strokeStyle = EDGE_COLOR;
-  ctx.lineWidth = DIM_EDGE_BAKE_LINE_WIDTH;
-  // canvas 內全 alpha,EDGE_DIM_ALPHA 在 blit 時一次上,避免多次 alpha 累加
-  for (const [, path] of bakedDim) {
+  ctx.scale(EDGE_BAKE_PX_PER_WORLD, EDGE_BAKE_PX_PER_WORLD);
+  ctx.translate(-aabb.minX + EDGE_BAKE_PAD, -aabb.minY + EDGE_BAKE_PAD);
+  ctx.strokeStyle = strokeColor;
+  ctx.lineCap = "round";
+  for (const [widthBucket, path] of paths) {
+    ctx.lineWidth = lineWidthOverride ?? widthBucket;
     ctx.stroke(path);
   }
 
-  return { canvas, worldX: minX - pad, worldY: minY - pad, worldW, worldH };
+  return {
+    canvas,
+    worldX: aabb.minX - EDGE_BAKE_PAD,
+    worldY: aabb.minY - EDGE_BAKE_PAD,
+    worldW,
+    worldH,
+  };
+}
+
+/**
+ * 把 4 個邊層(base / baseHop1 / baseHop2 / dim)各烘一張 offscreen canvas。
+ * 每幀渲染時對每一層 drawImage 一次(共 1~4 次)取代原本 per-widthBucket 的 stroke,
+ * GPU 端把上千條 bezier 光柵化壓縮成幾次紋理採樣,dense 區拖曳/縮放大幅加速。
+ *
+ * 各層獨立算 AABB 與 canvas,單層超尺寸(> EDGE_BAKE_MAX_PX)則該層回傳 null,
+ * 渲染 fallback 走原本的 per-widthBucket stroke,不影響其他層。
+ *
+ * 線寬處理:
+ * - base / hop1 / hop2:用該 widthBucket 值當 canvas 線寬(世界固定寬 → 縮放時等比變化)
+ * - dim:固定 DIM_EDGE_BAKE_LINE_WIDTH,視覺一致 + 更薄
+ */
+export function bakeEdgeLayers(layout: GraphLayout): BakedEdgeLayers | null {
+  if (typeof document === "undefined") return null;
+  const be = layout.bakedEdges;
+  if (!be) return null;
+  const rings = layout.rings;
+
+  const aabbBase = emptyAABB();
+  const aabbHop1 = emptyAABB();
+  const aabbHop2 = emptyAABB();
+  const aabbDim = emptyAABB();
+
+  for (const le of layout.edges) {
+    if (rings) {
+      if (le.egoDim > 0) {
+        extendAABB(aabbDim, le);
+      } else {
+        const ra = rings.get(le.edge.a) ?? 0;
+        const rb = rings.get(le.edge.b) ?? 0;
+        if (Math.max(ra, rb) >= 2) extendAABB(aabbHop2, le);
+        else extendAABB(aabbHop1, le);
+      }
+    } else {
+      extendAABB(aabbBase, le);
+    }
+  }
+
+  return {
+    base: bakeEdgeGroup(be.base, aabbBase, EDGE_COLOR, null),
+    baseHop1: be.baseHop1 ? bakeEdgeGroup(be.baseHop1, aabbHop1, HOP1_EDGE_COLOR, null) : null,
+    baseHop2: be.baseHop2 ? bakeEdgeGroup(be.baseHop2, aabbHop2, HOP2_EDGE_COLOR, null) : null,
+    dim: be.dim ? bakeEdgeGroup(be.dim, aabbDim, EDGE_COLOR, DIM_EDGE_BAKE_LINE_WIDTH) : null,
+  };
 }
 
 /** 標籤 sprite:每個節點的多行標籤渲染一次(最壞情況字級 × 2 倍解析度),之後縮放 blit */
@@ -760,52 +836,35 @@ export function drawNetwork(
     const hasHighlight = state.focusedId !== null || state.hoveredId !== null;
     const baseAlpha = hasHighlight ? EDGE_DIM_ALPHA : EDGE_ALPHA;
     const hopAlpha = hasHighlight ? EDGE_DIM_ALPHA : EDGE_HOP_ALPHA;
-    ctx.strokeStyle = EDGE_COLOR;
-    ctx.globalAlpha = baseAlpha;
-    for (const [widthBucket, path] of baked.base) {
-      ctx.lineWidth = widthBucket / scale;
-      ctx.stroke(path);
-    }
+    const bakedLayers = state.bakedEdgeLayers;
+    // 每層繪製:優先走預烘 bitmap 一次 blit(GPU 端省下上千條 bezier 光柵化);
+    // fallback(超尺寸/建立失敗)再走原本 per-widthBucket stroke。
+    const drawGroup = (
+      bake: BakedEdgeCanvas | null | undefined,
+      paths: Map<number, Path2D> | null | undefined,
+      color: string,
+      alpha: number,
+    ) => {
+      if (!paths || paths.size === 0) return;
+      ctx.globalAlpha = alpha;
+      if (bake) {
+        ctx.drawImage(bake.canvas, bake.worldX, bake.worldY, bake.worldW, bake.worldH);
+        return;
+      }
+      ctx.strokeStyle = color;
+      for (const [widthBucket, path] of paths) {
+        ctx.lineWidth = widthBucket / scale;
+        ctx.stroke(path);
+      }
+    };
+
+    drawGroup(bakedLayers?.base, baked.base, EDGE_COLOR, baseAlpha);
     // ego 模式:hop1(中心↔hop1、hop1↔hop1)塗綠、hop2(hop1↔hop2、hop2↔hop2)塗藍,
     // 讓分層結構本身就看得見,不用等 hover 才浮現
-    if (baked.baseHop1?.size) {
-      ctx.strokeStyle = HOP1_EDGE_COLOR;
-      ctx.globalAlpha = hopAlpha;
-      for (const [widthBucket, path] of baked.baseHop1) {
-        ctx.lineWidth = widthBucket / scale;
-        ctx.stroke(path);
-      }
-    }
-    if (baked.baseHop2?.size) {
-      ctx.strokeStyle = HOP2_EDGE_COLOR;
-      ctx.globalAlpha = hopAlpha;
-      for (const [widthBucket, path] of baked.baseHop2) {
-        ctx.lineWidth = widthBucket / scale;
-        ctx.stroke(path);
-      }
-    }
-    // dim:ego 外圍相關,alpha 固定 EDGE_DIM_ALPHA。
-    // 有預烘 bitmap 就一次 blit 覆蓋(GPU 端省下上千條 bezier 光柵化);
-    // 沒有(fallback:超過尺寸上限或建立失敗)則走原本 per-widthBucket stroke。
-    if (baked.dim) {
-      const bakedDimEdges = state.bakedDimEdgeLayer;
-      if (bakedDimEdges) {
-        ctx.globalAlpha = EDGE_DIM_ALPHA;
-        ctx.drawImage(
-          bakedDimEdges.canvas,
-          bakedDimEdges.worldX,
-          bakedDimEdges.worldY,
-          bakedDimEdges.worldW,
-          bakedDimEdges.worldH,
-        );
-      } else {
-        ctx.globalAlpha = EDGE_DIM_ALPHA;
-        for (const [widthBucket, path] of baked.dim) {
-          ctx.lineWidth = widthBucket / scale;
-          ctx.stroke(path);
-        }
-      }
-    }
+    drawGroup(bakedLayers?.baseHop1, baked.baseHop1, HOP1_EDGE_COLOR, hopAlpha);
+    drawGroup(bakedLayers?.baseHop2, baked.baseHop2, HOP2_EDGE_COLOR, hopAlpha);
+    // dim:ego 外圍相關,alpha 固定 EDGE_DIM_ALPHA
+    drawGroup(bakedLayers?.dim, baked.dim, EDGE_COLOR, EDGE_DIM_ALPHA);
 
     // hover/focus 高亮 overlay:focus 節點的邊常駐,hover 別的節點時再疊上它的邊,兩者可同時亮。
     // 上面 hop-1/2 已切過 strokeStyle,此處要重設回 EDGE_COLOR。
