@@ -113,6 +113,8 @@ export interface RenderState {
   /** 4 層邊(base/baseHop1/baseHop2/dim)的預烘結果;各層有 canvas 就走 drawImage,
    *  沒有(fallback:超尺寸/建立失敗)就走原本 per-widthBucket stroke */
   bakedEdgeLayers?: BakedEdgeLayers | null;
+  /** 使用者自己的 channel id;非 null 時該節點會有金色脈動光暈 */
+  myChannelId?: string | null;
 }
 
 export function createStarField(count = 260, spread = 2600) {
@@ -1034,7 +1036,7 @@ export function drawNetwork(
     // dim 節點的 sprite 已在上面預烘層一次畫完,per-node 這裡跳過(節省數百次 drawImage)
     // outline 仍走 strokeGroups(顏色可能隨 focus 變),hovered 例外要重畫(hovered 邊界較粗需要蓋在 baked 上)
     if (useBakedDim && isDim && !hovered) {
-      const strokeWidth = 2;
+      const strokeWidth = 4;
       if (strokeGroups) {
         const key = `${color}|${strokeWidth}|${nodeAlpha}`;
         let group = strokeGroups.get(key);
@@ -1075,7 +1077,7 @@ export function drawNetwork(
     }
 
     // 狀態色邊框:批次收集或逐一 stroke(fallback)
-    const strokeWidth = hovered ? 3 : 2;
+    const strokeWidth = hovered ? 6 : 4;
     if (strokeGroups) {
       const key = `${color}|${strokeWidth}|${nodeAlpha}`;
       let group = strokeGroups.get(key);
@@ -1101,6 +1103,31 @@ export function drawNetwork(
     }
   }
   ctx.globalAlpha = 1;
+
+  // ── 自己的節點:金色脈動光暈(兩層 sonar ping 交錯,1.5s 一輪)──
+  if (state.myChannelId) {
+    const meNode = state.layout.byId.get(state.myChannelId);
+    if (
+      meNode &&
+      meNode.x > viewMinX &&
+      meNode.x < viewMaxX &&
+      meNode.y > viewMinY &&
+      meNode.y < viewMaxY
+    ) {
+      const phase = (performance.now() / 1500) % 1;
+      ctx.strokeStyle = FOCUSED_COLOR;
+      ctx.lineWidth = 2 / scale;
+      for (let i = 0; i < 2; i++) {
+        const p = (phase + i * 0.5) % 1;
+        const radius = HEX_RADIUS + 2 + p * 18;
+        ctx.globalAlpha = (1 - p) * 0.7;
+        hexPath(ctx, meNode.x, meNode.y, radius);
+        ctx.stroke();
+      }
+      ctx.globalAlpha = 1;
+      state.requestRepaint?.();
+    }
+  }
 
   // ── 標籤(固定在節點下方置中;layout 已保證互不重疊)──
   if (!dotsOnly) {
