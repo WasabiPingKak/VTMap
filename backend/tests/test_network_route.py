@@ -60,3 +60,42 @@ class TestNetworkGraph:
         mock_graph.side_effect = ExternalServiceError("關係網路資料暫時無法取得")
         resp = client.get("/api/network/graph")
         assert resp.status_code == 502
+
+
+class TestNetworkRecent:
+    """GET /api/network/recent"""
+
+    @patch("routes.network_route.get_recent_nodes")
+    def test_returns_recent_nodes(self, mock_recent, client):
+        mock_recent.return_value = {
+            "nodes": [
+                {
+                    "channel_id": "UC_new",
+                    "title": "剛加入",
+                    "handle": "@newbie",
+                    "thumbnail": None,
+                    "subscriber_count": None,
+                    "created_at": "2026-08-30T00:00:00",
+                    "scanned": False,
+                }
+            ],
+        }
+        resp = client.get("/api/network/recent")
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["success"] is True
+        assert data["nodes"][0]["channel_id"] == "UC_new"
+        # 預設 limit 傳入
+        mock_recent.assert_called_once_with(20)
+
+    @patch("routes.network_route.get_recent_nodes")
+    def test_accepts_limit_query(self, mock_recent, client):
+        mock_recent.return_value = {"nodes": []}
+        client.get("/api/network/recent?limit=5")
+        mock_recent.assert_called_once_with(5)
+
+    @patch("routes.network_route.get_recent_nodes")
+    def test_invalid_limit_falls_back_to_default(self, mock_recent, client):
+        mock_recent.return_value = {"nodes": []}
+        client.get("/api/network/recent?limit=abc")
+        mock_recent.assert_called_once_with(20)

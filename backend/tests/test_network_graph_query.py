@@ -2,7 +2,7 @@
 
 from datetime import datetime
 
-from services.network.graph_query import build_graph_payload
+from services.network.graph_query import build_graph_payload, build_recent_payload
 
 # naive datetime 即可,_iso 只做 isoformat,不涉及時區運算
 TS = datetime(2026, 8, 28, 12, 0, 0)
@@ -54,3 +54,27 @@ def test_build_graph_payload_drops_evidence_without_edge():
     payload = build_graph_payload([], [], evidence_rows)
     assert payload["edges"] == []
     assert payload["nodes"] == []
+
+
+def test_build_recent_payload_serializes_created_at_and_scanned():
+    rows = [
+        ("UC_new", "剛加入", "@newbie", "https://img/n.jpg", None, TS, False),
+        ("UC_old", None, None, None, 54321, TS, True),
+    ]
+    payload = build_recent_payload(rows)
+    assert len(payload["nodes"]) == 2
+    assert payload["nodes"][0] == {
+        "channel_id": "UC_new",
+        "title": "剛加入",
+        "handle": "@newbie",
+        "thumbnail": "https://img/n.jpg",
+        "subscriber_count": None,
+        "created_at": TS.isoformat(),
+        "scanned": False,
+    }
+    assert payload["nodes"][1]["subscriber_count"] == 54321
+    assert payload["nodes"][1]["scanned"] is True
+
+
+def test_build_recent_payload_empty():
+    assert build_recent_payload([]) == {"nodes": []}

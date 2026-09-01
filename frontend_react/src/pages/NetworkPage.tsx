@@ -6,11 +6,12 @@
 import { useCallback, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { FaClipboardList, FaInfoCircle } from "react-icons/fa";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, LocateFixed } from "lucide-react";
 import NetworkGraph, { type NetworkGraphHandle } from "@/components/network/NetworkGraph";
 import DetailPanel from "@/components/network/DetailPanel";
 import NetworkToolbar from "@/components/network/NetworkToolbar";
 import NetworkLegend from "@/components/network/NetworkLegend";
+import RecentNodesPanel from "@/components/network/RecentNodesPanel";
 import { useNetworkGraph } from "@/hooks/useNetworkGraph";
 import { useMyChannelId } from "@/hooks/useMyChannelId";
 
@@ -22,6 +23,7 @@ export default function NetworkPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const graphRef = useRef<NetworkGraphHandle | null>(null);
   const [showInfo, setShowInfo] = useState(false);
+  const [showRecent, setShowRecent] = useState(false);
 
   const focusedId = searchParams.get("focus");
   const centerId = searchParams.get("center");
@@ -100,21 +102,32 @@ export default function NetworkPage() {
             onZoomIn={() => graphRef.current?.zoomIn()}
             onZoomOut={() => graphRef.current?.zoomOut()}
             onFitAll={() => graphRef.current?.fitAll()}
-            onLocate={handleLocate}
+            onOpenRecent={() => setShowRecent(true)}
           />
           <NetworkLegend />
-          {centerNode && (
-            <div className="absolute top-3 left-1/2 -translate-x-1/2 z-10 flex items-center gap-2 rounded-full bg-amber-500/15 border border-amber-500/60 px-3 py-1 text-sm text-amber-300">
-              圓心:{centerNode.title || centerNode.handle || centerNode.channel_id}
-              <button
-                onClick={() => setCenter(null)}
-                className="hover:text-amber-100"
-                aria-label="取消圓心檢視"
-              >
-                ✕
-              </button>
-            </div>
-          )}
+          {/* 上方中央:圓心 pill + 定位按鈕(從左工具列搬過來,語意上跟圓心/選取狀態綁在一起)*/}
+          <div className="absolute top-3 left-1/2 -translate-x-1/2 z-10 flex flex-col items-center gap-2">
+            {centerNode && (
+              <div className="flex items-center gap-2 rounded-full bg-amber-500/15 border border-amber-500/60 px-3 py-1 text-sm text-amber-300">
+                圓心:{centerNode.title || centerNode.handle || centerNode.channel_id}
+                <button
+                  onClick={() => setCenter(null)}
+                  className="hover:text-amber-100"
+                  aria-label="取消圓心檢視"
+                >
+                  ✕
+                </button>
+              </div>
+            )}
+            <button
+              onClick={handleLocate}
+              aria-label="定位"
+              title="定位到選取/圓心/自己的頻道"
+              className="p-2 rounded-lg bg-slate-950/80 backdrop-blur border border-slate-800 text-slate-300 hover:text-white hover:bg-slate-800"
+            >
+              <LocateFixed size={16} />
+            </button>
+          </div>
           {focusedId && (
             <DetailPanel
               data={data}
@@ -123,6 +136,15 @@ export default function NetworkPage() {
               onClose={() => setFocus(null)}
               onFocusChange={setFocus}
               onSetCenter={setCenter}
+            />
+          )}
+          {showRecent && (
+            <RecentNodesPanel
+              onFocus={(id) => {
+                setFocus(id);
+                setShowRecent(false);
+              }}
+              onClose={() => setShowRecent(false)}
             />
           )}
         </>

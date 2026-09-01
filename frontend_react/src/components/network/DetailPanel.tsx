@@ -6,19 +6,7 @@ import { useMemo } from "react";
 import { Crosshair, X } from "lucide-react";
 import type { NetworkEdge, NetworkGraphData, NetworkNode } from "@/types/network";
 import { channelDisplayName, channelInitial } from "./displayName";
-
-/** 訂閱數格式:
- *  < 1 萬 → 原始數字加千分位;
- *  1 萬 ~ 9.9 萬 → 一位小數的萬(例:5.4 萬);
- *  ≥ 10 萬 → 整數萬(例:120 萬)。
- *  null → 明確標示還沒抓,不用「不公開」這種含糊字。 */
-function formatSubscribers(count: number | null): string {
-  if (count === null) return "訂閱數還沒整理";
-  if (count < 10000) return `${count.toLocaleString("zh-TW")} 人訂閱`;
-  const wan = count / 10000;
-  const display = wan < 10 ? wan.toFixed(1) : Math.round(wan).toLocaleString("zh-TW");
-  return `${display} 萬人訂閱`;
-}
+import { formatSubscribers } from "./formatters";
 
 interface DetailPanelProps {
   data: NetworkGraphData;
