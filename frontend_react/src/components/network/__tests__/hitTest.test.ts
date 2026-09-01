@@ -5,10 +5,10 @@ import type { NetworkGraphData } from "@/types/network";
 
 const data: NetworkGraphData = {
   nodes: [
-    { channel_id: "UC_a", title: "A", handle: null, thumbnail: null, in_vtmap: true },
-    { channel_id: "UC_b", title: "B", handle: null, thumbnail: null, in_vtmap: true },
-    { channel_id: "UC_c", title: "C", handle: null, thumbnail: null, in_vtmap: true },
-    { channel_id: "UC_d", title: "D", handle: null, thumbnail: null, in_vtmap: true },
+    { channel_id: "UC_a", title: "A", handle: null, thumbnail: null, in_vtmap: true, subscriber_count: null, scanned: true },
+    { channel_id: "UC_b", title: "B", handle: null, thumbnail: null, in_vtmap: true, subscriber_count: null, scanned: true },
+    { channel_id: "UC_c", title: "C", handle: null, thumbnail: null, in_vtmap: true, subscriber_count: null, scanned: true },
+    { channel_id: "UC_d", title: "D", handle: null, thumbnail: null, in_vtmap: true, subscriber_count: null, scanned: true },
   ],
   edges: [
     { a: "UC_a", b: "UC_b", evidence_count: 1, last_seen_video_at: null, evidence: [] },

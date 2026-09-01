@@ -3,7 +3,15 @@ import { communityColor, detectCommunities } from "../communities";
 import type { NetworkGraphData } from "@/types/network";
 
 function makeNode(id: string) {
-  return { channel_id: id, title: id, handle: null, thumbnail: null, in_vtmap: true };
+  return {
+    channel_id: id,
+    title: id,
+    handle: null,
+    thumbnail: null,
+    in_vtmap: true,
+    subscriber_count: null,
+    scanned: true,
+  };
 }
 
 function makeEdge(a: string, b: string, weight = 3) {
