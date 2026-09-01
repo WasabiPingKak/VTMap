@@ -131,7 +131,6 @@ export default function NetworkPage() {
             onFocusChange={setFocus}
             panelInset={focusedId ? PANEL_INSET : 0}
             tuning={committedTuning}
-            myChannelId={me?.channelId ?? null}
           />
           <NetworkToolbar
             data={data}
