@@ -37,6 +37,9 @@ import {
   HOP2_COLOR,
   HOP2_EDGE_COLOR,
   HOP2_GLOW,
+  HOP3_COLOR,
+  HOP3_EDGE_COLOR,
+  HOP3_GLOW,
   LABEL_COLOR,
   LABEL_DIM,
   NEIGHBOR_COLOR,
@@ -81,12 +84,13 @@ export interface BakedEdgeCanvas {
   worldH: number;
 }
 
-/** 四種邊層(對應 bakedEdges.base/baseHop1/baseHop2/dim)各自的 bake。
+/** 五種邊層(對應 bakedEdges.base/baseHop1/baseHop2/baseHop3/dim)各自的 bake。
  *  null 表示該層無邊或超尺寸,渲染時 fallback 到 per-widthBucket stroke。 */
 export interface BakedEdgeLayers {
   base: BakedEdgeCanvas | null;
   baseHop1: BakedEdgeCanvas | null;
   baseHop2: BakedEdgeCanvas | null;
+  baseHop3: BakedEdgeCanvas | null;
   dim: BakedEdgeCanvas | null;
 }
 
@@ -97,7 +101,7 @@ export interface RenderState {
   focusedId: string | null;
   /** 聚焦節點的鄰居 id(邊的亮暗判斷用) */
   highlightIds: Set<string> | null;
-  /** 與參考點(選取優先,其次圓心)的跳數:0/1/2;不在表內 = 更遠 */
+  /** 與參考點(選取優先,其次圓心)的跳數:0/1/2/3;不在表內 = 更遠 */
   hopDistances: Map<string, number> | null;
   starField: { x: number; y: number; r: number; alpha: number }[];
   /** 要求載入頭像(延遲載入);未提供時不載圖 */
@@ -444,15 +448,15 @@ function bakeEdgeGroup(
 }
 
 /**
- * 把 4 個邊層(base / baseHop1 / baseHop2 / dim)各烘一張 offscreen canvas。
- * 每幀渲染時對每一層 drawImage 一次(共 1~4 次)取代原本 per-widthBucket 的 stroke,
+ * 把 5 個邊層(base / baseHop1 / baseHop2 / baseHop3 / dim)各烘一張 offscreen canvas。
+ * 每幀渲染時對每一層 drawImage 一次(共 1~5 次)取代原本 per-widthBucket 的 stroke,
  * GPU 端把上千條 bezier 光柵化壓縮成幾次紋理採樣,dense 區拖曳/縮放大幅加速。
  *
  * 各層獨立算 AABB 與 canvas,單層超尺寸(> EDGE_BAKE_MAX_PX)則該層回傳 null,
  * 渲染 fallback 走原本的 per-widthBucket stroke,不影響其他層。
  *
  * 線寬處理:
- * - base / hop1 / hop2:用該 widthBucket 值當 canvas 線寬(世界固定寬 → 縮放時等比變化)
+ * - base / hop1 / hop2 / hop3:用該 widthBucket 值當 canvas 線寬(世界固定寬 → 縮放時等比變化)
  * - dim:固定 DIM_EDGE_BAKE_LINE_WIDTH,視覺一致 + 更薄
  */
 export function bakeEdgeLayers(layout: GraphLayout): BakedEdgeLayers | null {
@@ -464,6 +468,7 @@ export function bakeEdgeLayers(layout: GraphLayout): BakedEdgeLayers | null {
   const aabbBase = emptyAABB();
   const aabbHop1 = emptyAABB();
   const aabbHop2 = emptyAABB();
+  const aabbHop3 = emptyAABB();
   const aabbDim = emptyAABB();
 
   for (const le of layout.edges) {
@@ -473,7 +478,9 @@ export function bakeEdgeLayers(layout: GraphLayout): BakedEdgeLayers | null {
       } else {
         const ra = rings.get(le.edge.a) ?? 0;
         const rb = rings.get(le.edge.b) ?? 0;
-        if (Math.max(ra, rb) >= 2) extendAABB(aabbHop2, le);
+        const outer = Math.max(ra, rb);
+        if (outer >= 3) extendAABB(aabbHop3, le);
+        else if (outer >= 2) extendAABB(aabbHop2, le);
         else extendAABB(aabbHop1, le);
       }
     } else {
@@ -485,6 +492,7 @@ export function bakeEdgeLayers(layout: GraphLayout): BakedEdgeLayers | null {
     base: bakeEdgeGroup(be.base, aabbBase, EDGE_COLOR, null),
     baseHop1: be.baseHop1 ? bakeEdgeGroup(be.baseHop1, aabbHop1, HOP1_EDGE_COLOR, null) : null,
     baseHop2: be.baseHop2 ? bakeEdgeGroup(be.baseHop2, aabbHop2, HOP2_EDGE_COLOR, null) : null,
+    baseHop3: be.baseHop3 ? bakeEdgeGroup(be.baseHop3, aabbHop3, HOP3_EDGE_COLOR, null) : null,
     dim: be.dim ? bakeEdgeGroup(be.dim, aabbDim, EDGE_COLOR, DIM_EDGE_BAKE_LINE_WIDTH) : null,
   };
 }
@@ -760,6 +768,9 @@ function computeFrameVisuals(
     } else if (distance === 2) {
       color = HOP2_COLOR;
       glow = HOP2_GLOW;
+    } else if (distance === 3) {
+      color = HOP3_COLOR;
+      glow = HOP3_GLOW;
     } else {
       color = FAR_COLOR;
       glow = FAR_GLOW;
@@ -879,10 +890,10 @@ export function drawNetwork(
     };
 
     drawGroup(bakedLayers?.base, baked.base, EDGE_COLOR, baseAlpha);
-    // ego 模式:hop1(中心↔hop1、hop1↔hop1)塗綠、hop2(hop1↔hop2、hop2↔hop2)塗藍,
-    // 讓分層結構本身就看得見,不用等 hover 才浮現
+    // ego 模式:hop1(綠)、hop2(藍)、hop3(紫)分別上色,讓分層結構本身就看得見,不用等 hover 才浮現
     drawGroup(bakedLayers?.baseHop1, baked.baseHop1, HOP1_EDGE_COLOR, hopAlpha);
     drawGroup(bakedLayers?.baseHop2, baked.baseHop2, HOP2_EDGE_COLOR, hopAlpha);
+    drawGroup(bakedLayers?.baseHop3, baked.baseHop3, HOP3_EDGE_COLOR, hopAlpha);
     // dim:ego 外圍相關,alpha 固定 EDGE_DIM_ALPHA
     drawGroup(bakedLayers?.dim, baked.dim, EDGE_COLOR, EDGE_DIM_ALPHA);
 

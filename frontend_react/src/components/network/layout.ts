@@ -60,7 +60,9 @@ export interface LayoutTuning {
   hop1CapMultiplier: number;
   /** hop2 半徑上限的倍率(乘上 ringRadii[2],0.5–2.0) */
   hop2CapMultiplier: number;
-  /** 外圍(灰點)半徑上限的倍率(乘上 ringRadii[3],0.3–2.0);< 1 可把灰點拉近 */
+  /** hop3 半徑上限的倍率(乘上 ringRadii[3],0.5–2.0) */
+  hop3CapMultiplier: number;
+  /** 外圍(灰點)半徑上限的倍率(乘上 ringRadii[4],0.3–2.0);< 1 可把灰點拉近 */
   outerCapMultiplier: number;
 }
 
@@ -72,11 +74,12 @@ export const DEFAULT_TUNING: LayoutTuning = {
   bandGap: 60,
   hop1CapMultiplier: 1,
   hop2CapMultiplier: 1,
-  outerCapMultiplier: 1,
+  hop3CapMultiplier: 1,
+  outerCapMultiplier: 0.3,
 };
 
-/** 外圍(與圓心兩層內無關)的環編號 */
-export const EGO_OUTER_RING = 3;
+/** 外圍(與圓心三層內無關)的環編號 */
+export const EGO_OUTER_RING = 4;
 
 /** hitGrid 桶邊長:> 2 * (HEX_RADIUS + hit tolerance),查一點只需掃 3×3 桶 */
 const HIT_GRID_CELL = 60;
@@ -118,7 +121,7 @@ function buildAdjacency(data: NetworkGraphData): Map<string, Set<string>> {
   return adjacency;
 }
 
-/** BFS 分環:圓心 0、直接 1、間接 2,其他一律歸為外圍 */
+/** BFS 分環:圓心 0、直接 1、間接 2、隔三層 3,其他一律歸為外圍 */
 function assignRings(
   centerId: string,
   nodeIds: string[],
@@ -127,7 +130,7 @@ function assignRings(
   const rings = new Map<string, number>();
   rings.set(centerId, 0);
   let frontier = [centerId];
-  for (let ring = 1; ring <= 2; ring++) {
+  for (let ring = 1; ring <= 3; ring++) {
     const next: string[] = [];
     for (const id of frontier) {
       for (const neighbor of adjacency.get(id) ?? []) {
@@ -150,15 +153,16 @@ function computeRingRadii(
   rings: Map<string, number>,
   halfWidthById: Map<string, number>,
 ): number[] {
-  const circumferenceNeed = [0, 0, 0, 0];
+  const circumferenceNeed = [0, 0, 0, 0, 0];
   for (const [id, ring] of rings) {
     if (ring === 0) continue;
     circumferenceNeed[ring] += (halfWidthById.get(id) ?? HEX_RADIUS) * 2 + 28;
   }
-  const radii = [0, 0, 0, 0];
+  const radii = [0, 0, 0, 0, 0];
   radii[1] = Math.max(220, (circumferenceNeed[1] / (2 * Math.PI)) * 1.15);
   radii[2] = Math.max(radii[1] + 190, (circumferenceNeed[2] / (2 * Math.PI)) * 1.1);
-  radii[3] = Math.max(radii[2] + 240, (circumferenceNeed[3] / (2 * Math.PI)) * 1.05);
+  radii[3] = Math.max(radii[2] + 190, (circumferenceNeed[3] / (2 * Math.PI)) * 1.08);
+  radii[4] = Math.max(radii[3] + 240, (circumferenceNeed[4] / (2 * Math.PI)) * 1.05);
   return radii;
 }
 
@@ -182,7 +186,7 @@ function computeCommunitySectorAngles(
 ): Map<string, number> {
   const inSub = (id: string): boolean => {
     const r = rings.get(id);
-    return r === 1 || r === 2;
+    return r === 1 || r === 2 || r === 3;
   };
   const subNodes = data.nodes.filter((n) => inSub(n.channel_id));
   const subEdges = data.edges.filter((e) => inSub(e.a) && inSub(e.b));
@@ -292,60 +296,48 @@ function computeEgoPositions(
   const ticks = Math.ceil(Math.log(sim.alphaMin()) / Math.log(1 - sim.alphaDecay()));
   sim.tick(ticks);
 
-  // 硬性徑向分帶:sim 決定角度,再依環別把 hop1/hop2 壓回上限、hop2/outer 推出下限,
-  // 確保 hop1(綠)與 hop2(藍)各自都在對應圓周內(不會被 link 力拉到天邊),
-  // 且 hop1 < hop2 < outer 三環嚴格分離。
+  // 硬性徑向分帶:sim 決定角度,再依環別把 hop1/hop2/hop3 壓回上限、下環推出下限,
+  // 確保 hop1(綠)<  hop2(藍)< hop3(紫)< outer(灰)四環嚴格分離,且各環都在對應圓周內。
   const BAND_GAP = tuning.bandGap;
+  const applyRing = (
+    ring: number,
+    floor: number,
+    cap: number,
+  ): number => {
+    let maxR = 0;
+    for (const sn of simNodes) {
+      if (rings.get(sn.id) !== ring) continue;
+      const r = Math.hypot(sn.x ?? 0, sn.y ?? 0);
+      if (r < floor && r > 0.01) {
+        const s = floor / r;
+        sn.x = (sn.x ?? 0) * s;
+        sn.y = (sn.y ?? 0) * s;
+      }
+      const r2 = Math.hypot(sn.x ?? 0, sn.y ?? 0);
+      if (r2 > cap && r2 > 0.01) {
+        const s = cap / r2;
+        sn.x = (sn.x ?? 0) * s;
+        sn.y = (sn.y ?? 0) * s;
+      }
+      const newR = Math.hypot(sn.x ?? 0, sn.y ?? 0);
+      if (newR > maxR) maxR = newR;
+    }
+    return maxR;
+  };
   const hop1Cap = ringRadii[1] * tuning.hop1CapMultiplier;
-  let maxHop1 = 0;
-  for (const sn of simNodes) {
-    if (rings.get(sn.id) !== 1) continue;
-    const r = Math.hypot(sn.x ?? 0, sn.y ?? 0);
-    if (r > hop1Cap && r > 0.01) {
-      const s = hop1Cap / r;
-      sn.x = (sn.x ?? 0) * s;
-      sn.y = (sn.y ?? 0) * s;
-    }
-    const newR = Math.hypot(sn.x ?? 0, sn.y ?? 0);
-    if (newR > maxHop1) maxHop1 = newR;
-  }
-  const hop2Floor = maxHop1 + BAND_GAP;
+  const maxHop1 = applyRing(1, 0, hop1Cap);
   const hop2Cap = ringRadii[2] * tuning.hop2CapMultiplier;
-  let maxHop2 = 0;
-  for (const sn of simNodes) {
-    if (rings.get(sn.id) !== 2) continue;
-    const r = Math.hypot(sn.x ?? 0, sn.y ?? 0);
-    if (r < hop2Floor && r > 0.01) {
-      const s = hop2Floor / r;
-      sn.x = (sn.x ?? 0) * s;
-      sn.y = (sn.y ?? 0) * s;
-    }
-    const r2 = Math.hypot(sn.x ?? 0, sn.y ?? 0);
-    if (r2 > hop2Cap && r2 > 0.01) {
-      const s = hop2Cap / r2;
-      sn.x = (sn.x ?? 0) * s;
-      sn.y = (sn.y ?? 0) * s;
-    }
-    const newR = Math.hypot(sn.x ?? 0, sn.y ?? 0);
-    if (newR > maxHop2) maxHop2 = newR;
-  }
-  const outerFloor = maxHop2 + BAND_GAP;
-  const outerCap = Math.max(ringRadii[3] * tuning.outerCapMultiplier, outerFloor);
-  for (const sn of simNodes) {
-    if (rings.get(sn.id) !== EGO_OUTER_RING) continue;
-    const r = Math.hypot(sn.x ?? 0, sn.y ?? 0);
-    if (r < outerFloor && r > 0.01) {
-      const s = outerFloor / r;
-      sn.x = (sn.x ?? 0) * s;
-      sn.y = (sn.y ?? 0) * s;
-    }
-    const r2 = Math.hypot(sn.x ?? 0, sn.y ?? 0);
-    if (r2 > outerCap && r2 > 0.01) {
-      const s = outerCap / r2;
-      sn.x = (sn.x ?? 0) * s;
-      sn.y = (sn.y ?? 0) * s;
-    }
-  }
+  const maxHop2 = applyRing(2, maxHop1 + BAND_GAP, hop2Cap);
+  const hop3Cap = Math.max(
+    ringRadii[3] * tuning.hop3CapMultiplier,
+    maxHop2 + BAND_GAP,
+  );
+  const maxHop3 = applyRing(3, maxHop2 + BAND_GAP, hop3Cap);
+  const outerCap = Math.max(
+    ringRadii[4] * tuning.outerCapMultiplier,
+    maxHop3 + BAND_GAP,
+  );
+  applyRing(EGO_OUTER_RING, maxHop3 + BAND_GAP, outerCap);
 
   return simNodes.map((sn) => ({ x: sn.x ?? 0, y: sn.y ?? 0 }));
 }
@@ -559,12 +551,13 @@ export function computeLayout(
   }
 
   // 把「全部邊的幾何」預烘進 per-widthBucket Path2D,渲染時一次 stroke 畫完取代 per-frame iterate。
-  // 非 ego:全部進 base(灰);ego:依「較外環」分 baseHop1/baseHop2(綠/藍),外圍相關進 dim。
+  // 非 ego:全部進 base(灰);ego:依「較外環」分 baseHop1/baseHop2/baseHop3(綠/藍/紫),外圍相關進 dim。
   let bakedEdges: BakedEdges | null = null;
   if (typeof Path2D !== "undefined") {
     const base = new Map<number, Path2D>();
     const baseHop1 = rings ? new Map<number, Path2D>() : null;
     const baseHop2 = rings ? new Map<number, Path2D>() : null;
+    const baseHop3 = rings ? new Map<number, Path2D>() : null;
     const dim = rings ? new Map<number, Path2D>() : null;
     for (const le of edges) {
       let bucket: Map<number, Path2D>;
@@ -572,10 +565,13 @@ export function computeLayout(
         if (le.egoDim > 0) {
           bucket = dim!;
         } else {
-          // 兩端都在 rings 0-2:取較外環決定顏色(hop1=綠、hop2=藍)
+          // 兩端都在 rings 0-3:取較外環決定顏色(hop1=綠、hop2=藍、hop3=紫)
           const ra = rings.get(le.edge.a) ?? 0;
           const rb = rings.get(le.edge.b) ?? 0;
-          bucket = Math.max(ra, rb) >= 2 ? baseHop2! : baseHop1!;
+          const outer = Math.max(ra, rb);
+          if (outer >= 3) bucket = baseHop3!;
+          else if (outer >= 2) bucket = baseHop2!;
+          else bucket = baseHop1!;
         }
       } else {
         bucket = base;
@@ -588,7 +584,7 @@ export function computeLayout(
       p.moveTo(le.source.x, le.source.y);
       p.quadraticCurveTo(le.controlX, le.controlY, le.target.x, le.target.y);
     }
-    bakedEdges = { base, baseHop1, baseHop2, dim };
+    bakedEdges = { base, baseHop1, baseHop2, baseHop3, dim };
   }
 
   // 每個節點的相連邊索引(hover/focus overlay 用,避免掃全表)

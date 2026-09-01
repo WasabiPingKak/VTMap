@@ -123,13 +123,13 @@ describe("computeLayout ego 模式", () => {
     ],
   };
 
-  it("BFS 分環:圓心 0、直接 1、間接 2、其餘外圍", () => {
+  it("BFS 分環:圓心 0、直接 1、間接 2、隔三層 3、其餘外圍", () => {
     const layout = computeLayout(egoData, undefined, { centerId: "UC_A" });
     expect(layout.egoCenterId).toBe("UC_A");
     expect(layout.rings?.get("UC_A")).toBe(0);
     expect(layout.rings?.get("UC_B")).toBe(1);
     expect(layout.rings?.get("UC_C")).toBe(2);
-    expect(layout.rings?.get("UC_D")).toBe(EGO_OUTER_RING);
+    expect(layout.rings?.get("UC_D")).toBe(3);
     expect(layout.rings?.get("UC_E")).toBe(EGO_OUTER_RING);
   });
 

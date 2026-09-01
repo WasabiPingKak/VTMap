@@ -116,12 +116,14 @@ export interface GraphLayout {
  * - base:非 ego 模式全部邊(灰色 EDGE_COLOR at EDGE_ALPHA);ego 模式為空(全走 hop 分組)。
  * - baseHop1:ego 模式,較外環 = 1 的邊(中心↔hop1、hop1↔hop1),塗 NEIGHBOR_COLOR。
  * - baseHop2:ego 模式,較外環 = 2 的邊(hop1↔hop2、hop2↔hop2),塗 HOP2_COLOR。
- * - dim:ego 模式 egoDim > 0(至少一端在外圍 ring 3)的邊,alpha 固定 EDGE_DIM_ALPHA。
+ * - baseHop3:ego 模式,較外環 = 3 的邊(hop2↔hop3、hop3↔hop3),塗 HOP3_COLOR。
+ * - dim:ego 模式 egoDim > 0(至少一端在外圍 ring 4)的邊,alpha 固定 EDGE_DIM_ALPHA。
  * 各組獨立分線寬桶,避免不同 alpha/顏色混合在一起。
  */
 export interface BakedEdges {
   base: Map<number, Path2D>;
   baseHop1: Map<number, Path2D> | null;
   baseHop2: Map<number, Path2D> | null;
+  baseHop3: Map<number, Path2D> | null;
   dim: Map<number, Path2D> | null;
 }
