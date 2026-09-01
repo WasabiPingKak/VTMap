@@ -53,6 +53,8 @@ interface GraphCanvasProps {
 export interface GraphCanvasHandle {
   requestRender: () => void;
   getTransform: () => CanvasTransform;
+  /** canvas 是否已被排版量測完成(size > 0);fitBounds/panTo 需要 size 才能算 */
+  isReady: () => boolean;
   zoomIn: () => void;
   zoomOut: () => void;
   panTo: (worldX: number, worldY: number, scale?: number | null, rightInset?: number) => void;
@@ -226,6 +228,7 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(function Gra
     () => ({
       requestRender,
       getTransform: () => transformRef.current,
+      isReady: () => sizeRef.current.width > 0 && sizeRef.current.height > 0,
 
       zoomIn() {
         const canvas = canvasRef.current;
@@ -288,6 +291,9 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(function Gra
         const dpr = window.devicePixelRatio || 1;
         const w = sizeRef.current.width / dpr;
         const h = sizeRef.current.height / dpr;
+        // canvas 還沒被排版量測(size=0)時,強制 fit 會算出 targetScale=0、
+        // 把 scaleExtent 設成 [0, 4] 卡住 d3-zoom;直接 no-op,呼叫端 rAF 重試即可
+        if (w <= 0 || h <= 0) return;
 
         const availW = w - rightInset;
         const boundsW = maxX - minX + padding * 2;

@@ -265,22 +265,37 @@ const NetworkGraph = forwardRef<NetworkGraphHandle, NetworkGraphProps>(function 
     };
   }, [layout]);
 
+  // canvas 還沒被排版量測完成時 fitBounds 會 no-op,用 rAF 輪詢直到 isReady()。
+  // 上限 60 幀(~1s)以防萬一,避免無限迴圈。
+  const scheduleFit = useCallback((fitFn: () => void, attempts = 60) => {
+    const tryOnce = (n: number) => {
+      if (n <= 0 || !canvasRef.current) return;
+      if (canvasRef.current.isReady()) {
+        fitFn();
+      } else {
+        requestAnimationFrame(() => tryOnce(n - 1));
+      }
+    };
+    requestAnimationFrame(() => tryOnce(attempts));
+  }, []);
+
   // 初次載入:fit 全圖
   const didInitialFit = useRef(false);
   useEffect(() => {
     if (didInitialFit.current || !layout || !layout.nodes.length) return;
     didInitialFit.current = true;
     const { minX, minY, maxX, maxY } = layout.bounds;
-    // 等 canvas 完成第一次 resize
-    requestAnimationFrame(() => canvasRef.current?.fitBounds(minX, minY, maxX, maxY));
-  }, [layout]);
+    scheduleFit(() => canvasRef.current?.fitBounds(minX, minY, maxX, maxY));
+  }, [layout, scheduleFit]);
 
   // ego 圓心切換:相機 fit 到兩環範圍(外圍淡化節點不納入取景)
   const prevEgoRef = useRef<string | null>(null);
   useEffect(() => {
     if (prevEgoRef.current === egoCenterId) return;
-    prevEgoRef.current = egoCenterId;
+    // layout 還沒好時先不更新 ref,等 layout 到位這個 effect 會再被觸發,
+    // 否則初次進頁若 URL 帶 ?center=xxx 會被吞掉、永遠 fit 不到 ego 範圍。
     if (!layout || !layout.nodes.length) return;
+    prevEgoRef.current = egoCenterId;
 
     let minX = Infinity;
     let minY = Infinity;
@@ -296,8 +311,11 @@ const NetworkGraph = forwardRef<NetworkGraphHandle, NetworkGraphProps>(function 
     if (!Number.isFinite(minX)) {
       ({ minX, minY, maxX, maxY } = layout.bounds);
     }
-    canvasRef.current?.fitBounds(minX, minY, maxX, maxY);
-  }, [egoCenterId, layout]);
+    const bounds = { minX, minY, maxX, maxY };
+    scheduleFit(() =>
+      canvasRef.current?.fitBounds(bounds.minX, bounds.minY, bounds.maxX, bounds.maxY),
+    );
+  }, [egoCenterId, layout, scheduleFit]);
 
   // 聚焦變化:只有真的換選取節點或側板寬度變才 pan;layout 重算(如微調參數)不重置相機。
   const lastFocusPan = useRef<{ id: string | null; inset: number }>({ id: null, inset: 0 });
