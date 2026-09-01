@@ -13,7 +13,7 @@ import {
 } from "react";
 import GraphCanvas, { type GraphCanvasHandle, type CanvasTransform } from "./GraphCanvas";
 import HoverCard, { type HoverCardData } from "./HoverCard";
-import { computeLayout } from "./layout";
+import { computeLayout, DEFAULT_TUNING, type LayoutTuning } from "./layout";
 import {
   bakeDimLayer,
   bakeEdgeLayers,
@@ -35,6 +35,8 @@ interface NetworkGraphProps {
   onFocusChange: (channelId: string | null) => void;
   /** 聚焦時側板佔用的右側寬度(px),相機置中時避開 */
   panelInset?: number;
+  /** ego 模式 layout 微調參數;省略 = 用預設值 */
+  tuning?: LayoutTuning;
 }
 
 export interface NetworkGraphHandle {
@@ -46,7 +48,7 @@ export interface NetworkGraphHandle {
 }
 
 const NetworkGraph = forwardRef<NetworkGraphHandle, NetworkGraphProps>(function NetworkGraph(
-  { data, focusedId, egoCenterId, onFocusChange, panelInset = 0 },
+  { data, focusedId, egoCenterId, onFocusChange, panelInset = 0, tuning = DEFAULT_TUNING },
   ref,
 ) {
   const canvasRef = useRef<GraphCanvasHandle | null>(null);
@@ -66,6 +68,7 @@ const NetworkGraph = forwardRef<NetworkGraphHandle, NetworkGraphProps>(function 
         data,
         undefined,
         egoCenterId ? { centerId: egoCenterId } : undefined,
+        tuning,
       );
       // 主動修剪 module-level sprite 快取:切 ego 圓心 / 資料換版時,
       // 舊節點的 sprite key 不會被自然命中,留著只等湊滿上限才 clear。
@@ -74,7 +77,7 @@ const NetworkGraph = forwardRef<NetworkGraphHandle, NetworkGraphProps>(function 
       setIsComputing(false);
     }, 30);
     return () => clearTimeout(timer);
-  }, [data, egoCenterId]);
+  }, [data, egoCenterId, tuning]);
 
   const starField = useMemo(() => createStarField(), []);
 

@@ -3,7 +3,7 @@
  */
 
 import { useMemo, useState } from "react";
-import { Clock, Maximize2, Minus, Plus, Search } from "lucide-react";
+import { Clock, Maximize2, Minus, Plus, Search, SlidersHorizontal } from "lucide-react";
 import type { NetworkGraphData, NetworkNode } from "@/types/network";
 import { channelDisplayName } from "./displayName";
 
@@ -15,6 +15,8 @@ interface NetworkToolbarProps {
   onFitAll: () => void;
   /** 展開「最新加入」面板 */
   onOpenRecent: () => void;
+  /** 切換 layout 微調面板 */
+  onToggleTuning: () => void;
 }
 
 export default function NetworkToolbar({
@@ -24,6 +26,7 @@ export default function NetworkToolbar({
   onZoomOut,
   onFitAll,
   onOpenRecent,
+  onToggleTuning,
 }: NetworkToolbarProps) {
   const [query, setQuery] = useState("");
 
@@ -80,6 +83,7 @@ export default function NetworkToolbar({
           { icon: <Minus size={16} />, action: onZoomOut, label: "縮小" },
           { icon: <Maximize2 size={16} />, action: onFitAll, label: "顯示全圖" },
           { icon: <Clock size={16} />, action: onOpenRecent, label: "最新加入" },
+          { icon: <SlidersHorizontal size={16} />, action: onToggleTuning, label: "Layout 微調" },
         ].map(({ icon, action, label }) => (
           <button
             key={label}
