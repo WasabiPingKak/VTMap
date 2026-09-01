@@ -29,6 +29,7 @@ const ROWS: ParamRow[] = [
   { key: "bandGap", label: "環間最小間距", min: 0, max: 200, step: 5, hint: "px" },
   { key: "hop1CapMultiplier", label: "hop1 半徑上限倍率", min: 0.5, max: 2, step: 0.05, hint: "× ringRadii[1]" },
   { key: "hop2CapMultiplier", label: "hop2 半徑上限倍率", min: 0.5, max: 2, step: 0.05, hint: "× ringRadii[2]" },
+  { key: "outerCapMultiplier", label: "外圍半徑上限倍率", min: 0.3, max: 2, step: 0.05, hint: "× ringRadii[3],< 1 把灰點拉近" },
 ];
 
 export default function TuningPanel({ tuning, onChange, onClose }: TuningPanelProps) {
