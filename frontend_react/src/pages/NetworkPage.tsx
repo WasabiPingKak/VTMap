@@ -150,14 +150,16 @@ export default function NetworkPage() {
         </>
       )}
 
-      {/* 回主站(唯一離開路徑,左上角) */}
-      <Link
-        to="/live-redirect"
-        className="absolute top-3 left-3 z-20 flex items-center gap-2 rounded-lg bg-slate-950/80 backdrop-blur border border-slate-800 px-3 py-2 text-sm text-slate-100 hover:bg-slate-800"
-      >
-        <ArrowLeft size={15} />
-        回 VTMap
-      </Link>
+      {/* 回主站(唯一離開路徑,左上角);最新加入面板打開時,按鈕搬到面板 header 內以避免遮擋 */}
+      {!showRecent && (
+        <Link
+          to="/live-redirect"
+          className="absolute top-3 left-3 z-20 flex items-center gap-2 rounded-lg bg-slate-950/80 backdrop-blur border border-slate-800 px-3 py-2 text-sm text-slate-100 hover:bg-slate-800"
+        >
+          <ArrowLeft size={15} />
+          回 VTMap
+        </Link>
+      )}
 
       {/* 管理員:資料蒐集佇列(右上) */}
       {me?.isAdmin && (

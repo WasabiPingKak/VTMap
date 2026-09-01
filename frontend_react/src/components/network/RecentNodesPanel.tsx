@@ -3,7 +3,8 @@
  * 目的是讓路人不用點節點也能看到誰是新面孔、誰還在等待掃描,避免看到連線數少誤以為壞掉。
  */
 
-import { X } from "lucide-react";
+import { ArrowLeft, X } from "lucide-react";
+import { Link } from "react-router-dom";
 import { useRecentNodes } from "@/hooks/useRecentNodes";
 import { channelDisplayName, channelInitial } from "./displayName";
 import { formatRelativeAdded, formatSubscribers } from "./formatters";
@@ -18,18 +19,27 @@ export default function RecentNodesPanel({ onFocus, onClose }: RecentNodesPanelP
 
   return (
     <aside className="absolute top-0 left-0 h-full w-full sm:w-[320px] bg-slate-950/90 backdrop-blur border-r border-slate-800 text-slate-100 flex flex-col z-20">
-      <div className="p-4 border-b border-slate-800 flex items-center justify-between">
+      <div className="p-4 border-b border-slate-800 flex flex-col gap-3">
+        <div className="flex items-center justify-between">
+          <Link
+            to="/live-redirect"
+            className="flex items-center gap-1.5 rounded-md border border-slate-800 bg-slate-900/60 px-2 py-1 text-xs text-slate-200 hover:bg-slate-800"
+          >
+            <ArrowLeft size={14} />
+            回 VTMap
+          </Link>
+          <button
+            onClick={onClose}
+            className="p-1 rounded hover:bg-slate-800"
+            aria-label="關閉"
+          >
+            <X size={18} />
+          </button>
+        </div>
         <div>
           <div className="font-bold text-sm">最新加入</div>
           <div className="text-xs text-slate-400 mt-0.5">圖上最近出現的頻道</div>
         </div>
-        <button
-          onClick={onClose}
-          className="p-1 rounded hover:bg-slate-800"
-          aria-label="關閉"
-        >
-          <X size={18} />
-        </button>
       </div>
 
       <div className="flex-1 overflow-y-auto">
