@@ -291,12 +291,17 @@ const NetworkGraph = forwardRef<NetworkGraphHandle, NetworkGraphProps>(function 
     canvasRef.current?.fitBounds(minX, minY, maxX, maxY);
   }, [egoCenterId, layout]);
 
-  // 聚焦變化:相機移過去 + 重繪
+  // 聚焦變化:只有真的換選取節點或側板寬度變才 pan;layout 重算(如微調參數)不重置相機。
+  const lastFocusPan = useRef<{ id: string | null; inset: number }>({ id: null, inset: 0 });
   useEffect(() => {
     canvasRef.current?.requestRender();
     if (!focusedId || !layout) return;
+    const isFocusChange = lastFocusPan.current.id !== focusedId;
+    const isInsetChange = lastFocusPan.current.inset !== panelInset;
+    if (!isFocusChange && !isInsetChange) return;
     const node = layout.byId.get(focusedId);
     if (!node) return;
+    lastFocusPan.current = { id: focusedId, inset: panelInset };
     const scale = Math.max(canvasRef.current?.getTransform().scale ?? 1, 0.9);
     canvasRef.current?.panTo(node.x, node.y, scale, panelInset);
   }, [focusedId, layout, panelInset]);

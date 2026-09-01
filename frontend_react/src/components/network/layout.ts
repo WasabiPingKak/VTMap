@@ -67,7 +67,7 @@ export interface LayoutTuning {
 }
 
 export const DEFAULT_TUNING: LayoutTuning = {
-  linkStrength: 0.1,
+  linkStrength: 0.05,
   chargeStrength: -220,
   radialStrength: 0.9,
   collidePadding: 12,
