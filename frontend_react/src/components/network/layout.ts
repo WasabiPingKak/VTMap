@@ -353,17 +353,77 @@ function computeEgoRingsPositions(
 }
 
 /**
- * ego 模式 force 佈局:直接沿用全圖 FA2 結果(linLog + strongGravity + scalingRatio,
- * 對節點多、邊密的社群才處理得動;純 d3-force 弱 charge/gravity 對大圖會全部糊一坨)。
+ * ego 模式 force 佈局:單獨跑一次 ForceAtlas2,參數比全圖模式更「散開」——
+ * 全圖模式強重力(gravity=1, strongGravityMode)是為了把孤島收攏成一坨看整張地圖,
+ * 但套在 ego view 就變成所有節點都擠在圓心附近。這裡把 gravity 調低、scalingRatio 拉大,
+ * 讓不同社群明顯分開;跟全圖分開快取,tuning 面板參數在這模式不生效。
  * computeLayout 之後會 translate 讓圓心位於 (0,0),所以這裡不用自己居中。
- * rings 依 BFS 分色仍有效(hop1/2/3 顏色不變),tuning 面板參數在這模式不生效。
  */
+const egoForcePositionsCache = new WeakMap<NetworkGraphData, { x: number; y: number }[]>();
 function computeEgoForcePositions(
   data: NetworkGraphData,
   useCache: boolean,
 ): { x: number; y: number }[] {
-  const basis = getGlobalBasis(data, useCache);
-  return basis.positions.map((p) => ({ x: p.x, y: p.y }));
+  if (useCache) {
+    const cached = egoForcePositionsCache.get(data);
+    if (cached) return cached;
+  }
+
+  const graph = buildGraph(data);
+  data.nodes.forEach((n, i) => {
+    const angle = hashAngle(n.channel_id);
+    const radius = 60 + ((i * 137) % 400);
+    graph.setNodeAttribute(n.channel_id, "x", Math.cos(angle) * radius);
+    graph.setNodeAttribute(n.channel_id, "y", Math.sin(angle) * radius);
+  });
+
+  if (graph.size > 0) {
+    forceAtlas2.assign(graph, {
+      iterations: 300,
+      getEdgeWeight: "weight",
+      settings: {
+        linLogMode: true,
+        // 相對全圖模式:重力大幅降低、關掉 strongGravity、scalingRatio 拉大,
+        // 讓叢集間隔明顯,不再糊成一坨。
+        gravity: 0.3,
+        strongGravityMode: false,
+        scalingRatio: 12,
+        edgeWeightInfluence: 1,
+        barnesHutOptimize: graph.order > 200,
+      },
+    });
+  }
+
+  const positions = data.nodes.map((n) => ({
+    x: graph.getNodeAttribute(n.channel_id, "x") as number,
+    y: graph.getNodeAttribute(n.channel_id, "y") as number,
+  }));
+
+  // 跟全圖一樣:縮放到「有連線的節點對中位數距離 = TARGET_LINKED_DISTANCE」
+  const indexById = new Map(data.nodes.map((n, i) => [n.channel_id, i]));
+  const linkedDistances: number[] = [];
+  for (const edge of data.edges) {
+    const a = indexById.get(edge.a);
+    const b = indexById.get(edge.b);
+    if (a === undefined || b === undefined) continue;
+    linkedDistances.push(
+      Math.hypot(positions[a].x - positions[b].x, positions[a].y - positions[b].y),
+    );
+  }
+  if (linkedDistances.length) {
+    linkedDistances.sort((x, y) => x - y);
+    const median = linkedDistances[Math.floor(linkedDistances.length / 2)];
+    if (median > 0) {
+      const scale = Math.min(Math.max(TARGET_LINKED_DISTANCE / median, 0.3), 20);
+      for (const p of positions) {
+        p.x *= scale;
+        p.y *= scale;
+      }
+    }
+  }
+
+  if (useCache) egoForcePositionsCache.set(data, positions);
+  return positions;
 }
 
 /**
