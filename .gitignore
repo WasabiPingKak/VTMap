@@ -17,3 +17,5 @@ node_modules
 .claude/
 channel_list*
 *.stackdump
+backend/crawler-run.log
+backend/crawler-run.log.*

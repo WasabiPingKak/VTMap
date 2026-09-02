@@ -299,6 +299,29 @@ def queue_summary(conn: psycopg.Connection) -> list[tuple[str, str, int]]:
         return [(r[0], r[1], int(r[2])) for r in cur.fetchall()]
 
 
+def retry_failed_tasks(conn: psycopg.Connection) -> int:
+    """把所有 failed 任務放回 pending 並重置 attempts。"""
+    with conn.cursor() as cur:
+        cur.execute(
+            "update crawl_queue set status = 'pending', attempts = 0 where status = 'failed'"
+        )
+        return cur.rowcount
+
+
+def requeue_list_videos_for_channel(conn: psycopg.Connection, channel_id: str) -> int:
+    """把指定頻道的 list_videos 從 done/failed 改回 pending。"""
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            update crawl_queue
+            set status = 'pending', attempts = 0
+            where kind = %s and channel_id = %s and status in ('done', 'failed')
+            """,
+            (KIND_LIST_VIDEOS, channel_id),
+        )
+        return cur.rowcount
+
+
 def data_summary(conn: psycopg.Connection) -> dict[str, int]:
     with conn.cursor() as cur:
         cur.execute("select count(*) from channels")
