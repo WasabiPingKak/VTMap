@@ -10,6 +10,7 @@
   python -m crawler status                         # 佇列與資料統計
   python -m crawler enrich-channels [--limit N]    # 補完頻道正式名稱與頭像(YouTube API)
   python -m crawler serve [--port 5001]            # 前端開發用迷你 API server
+  python -m crawler admin [--port 5002]            # 管理台 UI (瀏覽器開啟)
 """
 
 import argparse
@@ -61,12 +62,21 @@ def main() -> None:
     p_serve = sub.add_parser("serve")
     p_serve.add_argument("--port", type=int, default=5001)
 
+    p_admin = sub.add_parser("admin")
+    p_admin.add_argument("--port", type=int, default=5002)
+
     args = parser.parse_args()
 
     if args.command == "serve":
         from crawler.dev_server import serve
 
         serve(args.port)
+        return
+
+    if args.command == "admin":
+        from crawler.admin import serve as serve_admin
+
+        serve_admin(args.port)
         return
 
     # 無人值守模式自己管理連線(分段重連),不能包在下面共用的連線裡

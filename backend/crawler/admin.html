@@ -1,0 +1,402 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>爬蟲管理台</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #0f1115;
+    --panel: #171a21;
+    --panel-2: #1f232c;
+    --border: #262b36;
+    --text: #e6e8ee;
+    --muted: #8a94a6;
+    --accent: #4ea1ff;
+    --ok: #58c47a;
+    --warn: #e0a339;
+    --danger: #e46464;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 14px/1.5 "Segoe UI", "Microsoft JhengHei", -apple-system, sans-serif;
+  }
+  header {
+    padding: 14px 20px;
+    background: var(--panel);
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+  }
+  header h1 { margin: 0; font-size: 18px; font-weight: 600; }
+  header .last { color: var(--muted); font-size: 12px; }
+  main {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(320px, 1fr));
+    gap: 14px;
+    padding: 14px;
+    max-width: 1400px;
+    margin: 0 auto;
+  }
+  section {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 14px 16px;
+  }
+  section h2 {
+    margin: 0 0 10px;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  .full { grid-column: 1 / -1; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .row + .row { margin-top: 10px; }
+  button {
+    background: var(--panel-2);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 6px 12px;
+    font: inherit;
+    cursor: pointer;
+    transition: background 0.1s, border-color 0.1s;
+  }
+  button:hover:not(:disabled) { background: #262b36; border-color: #3a414f; }
+  button:disabled { opacity: 0.45; cursor: not-allowed; }
+  button.primary { background: #1a4a7a; border-color: #2a6ba8; }
+  button.primary:hover:not(:disabled) { background: #235c93; }
+  button.danger { border-color: #6b3838; color: #ffb0b0; }
+  button.danger:hover:not(:disabled) { background: #3a2020; }
+  input[type=text] {
+    background: var(--panel-2);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 6px 10px;
+    font: inherit;
+    min-width: 240px;
+  }
+  .badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 12px;
+    font-weight: 600;
+  }
+  .badge.running { background: #1c3a24; color: var(--ok); }
+  .badge.stopped { background: #3a2020; color: var(--danger); }
+  .badge.exited  { background: #3a3520; color: var(--warn); }
+  .kv { color: var(--muted); }
+  .kv strong { color: var(--text); font-weight: 600; margin-left: 4px; }
+  table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+  th, td { padding: 4px 8px; text-align: left; border-bottom: 1px solid var(--border); }
+  th { color: var(--muted); font-weight: 500; font-size: 12px; }
+  td.n { text-align: right; }
+  .data-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 10px;
+  }
+  .data-tile {
+    background: var(--panel-2);
+    border-radius: 6px;
+    padding: 12px;
+    text-align: center;
+  }
+  .data-tile .num { font-size: 22px; font-weight: 600; }
+  .data-tile .label { color: var(--muted); font-size: 12px; margin-top: 4px; }
+  pre.log {
+    background: #0a0c10;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 10px 12px;
+    max-height: 420px;
+    overflow: auto;
+    font: 12px/1.5 Consolas, "Cascadia Code", monospace;
+    white-space: pre-wrap;
+    word-break: break-all;
+    margin: 0;
+  }
+  .toast {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--accent);
+    border-radius: 6px;
+    padding: 10px 14px;
+    max-width: 400px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+    opacity: 0;
+    transform: translateY(10px);
+    transition: opacity 0.2s, transform 0.2s;
+    pointer-events: none;
+  }
+  .toast.show { opacity: 1; transform: translateY(0); }
+  .toast.error { border-left-color: var(--danger); }
+  .toast.ok { border-left-color: var(--ok); }
+</style>
+</head>
+<body>
+<header>
+  <h1>爬蟲管理台</h1>
+  <span class="last" id="lastUpdated">尚未更新</span>
+</header>
+<main>
+  <section class="full">
+    <h2>爬蟲程式</h2>
+    <div class="row">
+      <span id="procBadge" class="badge stopped">未執行</span>
+      <span class="kv" id="procDetail">目前沒有在跑</span>
+    </div>
+    <div class="row">
+      <button class="primary" id="btnStartRun">啟動爬蟲</button>
+      <button class="danger" id="btnStop">停止</button>
+      <button id="btnRestart">重新啟動</button>
+      <button id="btnEnrich">跑一次「補完頻道資料」</button>
+      <button id="btnExpand">跑一次「重整佇列」</button>
+    </div>
+  </section>
+
+  <section>
+    <h2>佇列</h2>
+    <table id="queueTable">
+      <thead><tr><th>類型</th><th>狀態</th><th class="n">數量</th></tr></thead>
+      <tbody><tr><td colspan="3" class="kv">載入中...</td></tr></tbody>
+    </table>
+    <div class="row" style="margin-top: 12px;">
+      <button class="danger" id="btnRetryFailed">把失敗任務改回待處理</button>
+    </div>
+  </section>
+
+  <section>
+    <h2>資料</h2>
+    <div class="data-grid">
+      <div class="data-tile"><div class="num" id="dChannels">-</div><div class="label">頻道</div></div>
+      <div class="data-tile"><div class="num" id="dObs">-</div><div class="label">觀察</div></div>
+      <div class="data-tile"><div class="num" id="dEdges">-</div><div class="label">關係</div></div>
+    </div>
+  </section>
+
+  <section class="full">
+    <h2>加入佇列</h2>
+    <div class="row">
+      <label>頻道 ID</label>
+      <input type="text" id="seedInput" placeholder="UCxxxxxxxxxxxxxxxxxxxxxx">
+      <button class="primary" id="btnAddSeed">加入為新種子</button>
+    </div>
+    <div class="row">
+      <label>頻道 ID</label>
+      <input type="text" id="requeueInput" placeholder="UCxxxxxxxxxxxxxxxxxxxxxx">
+      <button class="danger" id="btnRequeue">重排這個頻道的影片列表</button>
+    </div>
+  </section>
+
+  <section class="full">
+    <h2>日誌（尾 200 行）</h2>
+    <pre class="log" id="logBox">載入中...</pre>
+  </section>
+</main>
+<div class="toast" id="toast"></div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+let toastTimer = null;
+function toast(message, kind) {
+  const el = $("toast");
+  el.className = "toast show " + (kind || "");
+  el.textContent = message;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { el.className = "toast " + (kind || ""); }, 3500);
+}
+
+async function api(path, opts) {
+  const resp = await fetch(path, opts);
+  const text = await resp.text();
+  let data = null;
+  try { data = text ? JSON.parse(text) : null; } catch { /* not json */ }
+  if (!resp.ok) {
+    const msg = (data && (data.error || data.message)) || `HTTP ${resp.status}`;
+    throw new Error(msg);
+  }
+  return data;
+}
+
+async function post(path, body) {
+  return api(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: body ? JSON.stringify(body) : "",
+  });
+}
+
+function fmtNum(n) { return (n ?? 0).toLocaleString("en-US"); }
+function fmtUptime(iso) {
+  if (!iso) return "";
+  const s = Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 1000));
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = s % 60;
+  return `${h}h ${m}m ${sec}s`;
+}
+
+const KIND_LABELS = {
+  "run": "爬蟲執行",
+  "enrich-channels": "補完頻道資料",
+  "expand": "重整佇列",
+};
+const STATUS_LABELS = {
+  pending: "待處理",
+  running: "執行中",
+  done: "完成",
+  failed: "失敗",
+};
+
+function renderStatus(s) {
+  const p = s.crawler || {};
+  const badge = $("procBadge");
+  const detail = $("procDetail");
+  if (p.status === "running") {
+    badge.className = "badge running";
+    badge.textContent = "執行中";
+    const kindLabel = KIND_LABELS[p.kind] || p.kind || "";
+    detail.innerHTML = `<span class="kv">類型 <strong>${kindLabel}</strong></span>
+      &nbsp;&nbsp;<span class="kv">PID <strong>${p.pid}</strong></span>
+      &nbsp;&nbsp;<span class="kv">已跑 <strong>${fmtUptime(p.started_at)}</strong></span>`;
+  } else if (p.status === "exited") {
+    badge.className = "badge exited";
+    badge.textContent = "剛結束";
+    const rc = p.return_code;
+    const kindLabel = KIND_LABELS[p.kind] || p.kind || "";
+    detail.innerHTML = `<span class="kv">上一次 <strong>${kindLabel}</strong> 已結束（return code ${rc}）</span>`;
+  } else {
+    badge.className = "badge stopped";
+    badge.textContent = "未執行";
+    detail.textContent = "目前沒有在跑";
+  }
+
+  const running = p.status === "running";
+  $("btnStartRun").disabled = running;
+  $("btnStop").disabled = !running;
+  $("btnRestart").disabled = false;
+  $("btnEnrich").disabled = running;
+  $("btnExpand").disabled = running;
+
+  const tbody = $("queueTable").querySelector("tbody");
+  const rows = (s.queue || []).map((r) => `
+    <tr>
+      <td>${r.kind}</td>
+      <td>${STATUS_LABELS[r.status] || r.status}</td>
+      <td class="n">${fmtNum(r.count)}</td>
+    </tr>`).join("");
+  tbody.innerHTML = rows || `<tr><td colspan="3" class="kv">佇列是空的</td></tr>`;
+
+  const failedCount = (s.queue || [])
+    .filter((r) => r.status === "failed")
+    .reduce((sum, r) => sum + (r.count || 0), 0);
+  const btn = $("btnRetryFailed");
+  btn.textContent = failedCount
+    ? `把 ${fmtNum(failedCount)} 個失敗任務改回待處理`
+    : `把失敗任務改回待處理`;
+  btn.disabled = failedCount === 0;
+
+  const d = s.data || {};
+  $("dChannels").textContent = fmtNum(d.channels);
+  $("dObs").textContent = fmtNum(d.observations);
+  $("dEdges").textContent = fmtNum(d.edges);
+
+  $("lastUpdated").textContent = "最近更新 " + new Date().toLocaleTimeString();
+}
+
+async function refreshStatus() {
+  try {
+    const s = await api("/api/admin/status");
+    renderStatus(s);
+  } catch (e) {
+    $("lastUpdated").textContent = "更新失敗：" + e.message;
+  }
+}
+
+async function refreshLog() {
+  try {
+    const resp = await fetch("/api/admin/log/tail?lines=200");
+    const text = await resp.text();
+    const box = $("logBox");
+    const atBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 40;
+    box.textContent = text || "（尚無日誌）";
+    if (atBottom) box.scrollTop = box.scrollHeight;
+  } catch (e) {
+    $("logBox").textContent = "讀取日誌失敗：" + e.message;
+  }
+}
+
+async function tick() {
+  await Promise.all([refreshStatus(), refreshLog()]);
+}
+
+function bind() {
+  $("btnStartRun").onclick = async () => {
+    try { const r = await post("/api/admin/run/start"); toast(r.message, "ok"); tick(); }
+    catch (e) { toast(e.message, "error"); }
+  };
+  $("btnStop").onclick = async () => {
+    if (!confirm("確定要停止爬蟲嗎？")) return;
+    try { const r = await post("/api/admin/run/stop"); toast(r.message, "ok"); tick(); }
+    catch (e) { toast(e.message, "error"); }
+  };
+  $("btnRestart").onclick = async () => {
+    if (!confirm("確定要重新啟動爬蟲嗎？")) return;
+    try { const r = await post("/api/admin/run/restart"); toast(r.message, "ok"); tick(); }
+    catch (e) { toast(e.message, "error"); }
+  };
+  $("btnEnrich").onclick = async () => {
+    try { const r = await post("/api/admin/enrich"); toast(r.message, "ok"); tick(); }
+    catch (e) { toast(e.message, "error"); }
+  };
+  $("btnExpand").onclick = async () => {
+    try { const r = await post("/api/admin/expand"); toast(r.message, "ok"); tick(); }
+    catch (e) { toast(e.message, "error"); }
+  };
+  $("btnRetryFailed").onclick = async () => {
+    if (!confirm("確定要把所有失敗任務改回待處理嗎？")) return;
+    try { const r = await post("/api/admin/retry_failed"); toast(r.message, "ok"); tick(); }
+    catch (e) { toast(e.message, "error"); }
+  };
+  $("btnAddSeed").onclick = async () => {
+    const id = $("seedInput").value.trim();
+    if (!id) { toast("請先輸入頻道 ID", "error"); return; }
+    try {
+      const r = await post("/api/admin/enqueue/channel", { channel_id: id });
+      toast(r.message, "ok");
+      $("seedInput").value = "";
+      tick();
+    } catch (e) { toast(e.message, "error"); }
+  };
+  $("btnRequeue").onclick = async () => {
+    const id = $("requeueInput").value.trim();
+    if (!id) { toast("請先輸入頻道 ID", "error"); return; }
+    if (!confirm(`確定要把 ${id} 的影片列表重排嗎？`)) return;
+    try {
+      const r = await post("/api/admin/enqueue/list_videos", { channel_id: id });
+      toast(r.message, "ok");
+      tick();
+    } catch (e) { toast(e.message, "error"); }
+  };
+}
+
+bind();
+tick();
+setInterval(tick, 2000);
+</script>
+</body>
+</html>
