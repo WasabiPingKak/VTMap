@@ -150,7 +150,10 @@
 <body>
 <header>
   <h1>爬蟲管理台</h1>
-  <span class="last" id="lastUpdated">尚未更新</span>
+  <div style="display:flex; gap:16px; align-items:baseline;">
+    <a href="/queue" style="color: var(--accent); text-decoration: none;">查看佇列明細 →</a>
+    <span class="last" id="lastUpdated">尚未更新</span>
+  </div>
 </header>
 <main>
   <section class="full">
@@ -198,7 +201,7 @@
     <div class="row">
       <label>頻道 ID</label>
       <input type="text" id="requeueInput" placeholder="UCxxxxxxxxxxxxxxxxxxxxxx">
-      <button class="danger" id="btnRequeue">重排這個頻道的影片列表</button>
+      <button class="danger" id="btnRequeue">重抓這個頻道的影片列表</button>
     </div>
   </section>
 
@@ -385,7 +388,7 @@ function bind() {
   $("btnRequeue").onclick = async () => {
     const id = $("requeueInput").value.trim();
     if (!id) { toast("請先輸入頻道 ID", "error"); return; }
-    if (!confirm(`確定要把 ${id} 的影片列表重排嗎？`)) return;
+    if (!confirm(`確定要重抓 ${id} 的影片列表嗎？`)) return;
     try {
       const r = await post("/api/admin/enqueue/list_videos", { channel_id: id });
       toast(r.message, "ok");
