@@ -379,7 +379,7 @@ export function bakeDimLayer(
  * 只用來畫 ego 外圍相關的邊(alpha 0.05)。刻意不做 per-scale 反縮放,
  * 讓縮放小時線變細(視覺雜訊少)、縮放大時稍粗(dim 但可辨識),對 dim 邊而言合理。
  */
-const DIM_EDGE_BAKE_LINE_WIDTH = 1.5;
+const DIM_EDGE_BAKE_LINE_WIDTH = 1;
 
 interface EdgeAABB {
   minX: number;

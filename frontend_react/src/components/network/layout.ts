@@ -698,8 +698,8 @@ export function computeLayout(
     const controlX = (source.x + target.x) / 2 - (dy / length) * bow;
     const controlY = (source.y + target.y) / 2 + (dx / length) * bow;
 
-    const width = Math.min(1 + edge.evidence_count * 0.6, 5);
-    const widthBucket = Math.round(width * 2) / 2;
+    const width = 1;
+    const widthBucket = 1;
 
     // ego 淡化狀態:兩端都在外圍 → 2(渲染時直接跳過);一端在外圍 → 1;兩端都亮 → 0
     let egoDim: 0 | 1 | 2 = 0;
