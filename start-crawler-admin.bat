@@ -1,5 +1,7 @@
 @echo off
-chcp 65001 > nul
+rem Crawler Admin launcher. Keep this file ASCII-only:
+rem cmd reads .bat files with the system ANSI codepage (CP950 on this box),
+rem so UTF-8 multibyte chars inside a rem line will scramble the parser.
 setlocal
 cd /d "%~dp0backend"
 
@@ -10,7 +12,7 @@ echo Starting crawler admin at %URL%
 echo Close this window to stop the admin server and crawler.
 echo.
 
-rem 延後 2 秒等 server 起來再開瀏覽器 (用 powershell 避開 cmd 引號 nesting 問題)
+rem Wait 2s then open the browser via powershell (single quotes only).
 start "" powershell -NoProfile -Command "Start-Sleep -Seconds 2; Start-Process '%URL%'"
 
 python -X utf8 -u -m crawler admin --port %PORT%
