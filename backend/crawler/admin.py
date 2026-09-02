@@ -30,7 +30,29 @@ logger = logging.getLogger(__name__)
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 ADMIN_HTML = Path(__file__).resolve().parent / "admin.html"
+QUEUE_HTML = Path(__file__).resolve().parent / "queue.html"
 LOG_FILE = BACKEND_DIR / "crawler-run.log"
+
+_ACTIVE_TASKS_SQL = """
+select q.id, q.kind, q.status, q.priority, q.attempts, q.channel_id, q.video_id,
+       q.last_error, q.created_at, q.updated_at,
+       c.title, c.handle, c.thumbnail_url
+from crawl_queue q
+left join channels c on c.channel_id = q.channel_id
+where q.status in ('pending', 'running', 'failed')
+order by case q.status when 'running' then 0 when 'pending' then 1 else 2 end,
+         q.priority desc, q.id
+limit 500
+"""
+
+_RECENT_DONE_SQL = """
+select q.id, q.kind, q.channel_id, q.video_id, q.updated_at, c.title, c.handle
+from crawl_queue q
+left join channels c on c.channel_id = q.channel_id
+where q.status = 'done'
+order by q.updated_at desc
+limit 20
+"""
 
 _VALID_KINDS = {"run", "enrich-channels", "expand"}
 
@@ -266,13 +288,13 @@ def _handle_enqueue_list_videos(handler: BaseHTTPRequestHandler) -> None:
         _json_response(
             handler,
             200,
-            {"success": True, "message": f"{channel_id} 沒有可重排的 list_videos"},
+            {"success": True, "message": f"{channel_id} 沒有可重抓的影片列表"},
         )
         return
     _json_response(
         handler,
         200,
-        {"success": True, "message": f"已把 {channel_id} 的 {count} 筆 list_videos 改回待處理"},
+        {"success": True, "message": f"已排定重抓 {channel_id} 的影片列表({count} 筆)"},
     )
 
 
@@ -296,9 +318,74 @@ def _handle_index(handler: BaseHTTPRequestHandler) -> None:
     _text_response(handler, 200, body, "text/html; charset=utf-8")
 
 
+def _handle_queue_page(handler: BaseHTTPRequestHandler) -> None:
+    try:
+        body = QUEUE_HTML.read_bytes()
+    except FileNotFoundError:
+        _text_response(handler, 500, b"queue.html not found", "text/plain")
+        return
+    _text_response(handler, 200, body, "text/html; charset=utf-8")
+
+
+def _iso(value: object) -> str | None:
+    return value.isoformat() if isinstance(value, datetime) else None
+
+
+def _handle_queue_data(handler: BaseHTTPRequestHandler) -> None:
+    try:
+        with get_conn() as conn, conn.cursor() as cur:
+            cur.execute(_ACTIVE_TASKS_SQL)
+            tasks = [
+                {
+                    "id": r[0],
+                    "kind": r[1],
+                    "status": r[2],
+                    "priority": r[3],
+                    "attempts": r[4],
+                    "channel_id": r[5],
+                    "video_id": r[6],
+                    "last_error": r[7],
+                    "created_at": _iso(r[8]),
+                    "updated_at": _iso(r[9]),
+                    "channel_title": r[10],
+                    "channel_handle": r[11],
+                    "channel_thumbnail": r[12],
+                }
+                for r in cur.fetchall()
+            ]
+            cur.execute(_RECENT_DONE_SQL)
+            recent_done = [
+                {
+                    "id": r[0],
+                    "kind": r[1],
+                    "channel_id": r[2],
+                    "video_id": r[3],
+                    "updated_at": _iso(r[4]),
+                    "channel_title": r[5],
+                    "channel_handle": r[6],
+                }
+                for r in cur.fetchall()
+            ]
+    except Exception as e:
+        _json_response(handler, 500, {"success": False, "error": str(e)})
+        return
+    _json_response(
+        handler,
+        200,
+        {
+            "success": True,
+            "tasks": tasks,
+            "recent_done": recent_done,
+            "server_time": datetime.now(timezone.utc).isoformat(),
+        },
+    )
+
+
 _GET_ROUTES = {
     "/": _handle_index,
+    "/queue": _handle_queue_page,
     "/api/admin/status": _handle_status,
+    "/api/admin/queue": _handle_queue_data,
 }
 
 _POST_ROUTES = {

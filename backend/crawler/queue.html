@@ -1,0 +1,401 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>爬蟲佇列明細</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #0f1115;
+    --panel: #171a21;
+    --panel-2: #1f232c;
+    --border: #262b36;
+    --text: #e6e8ee;
+    --muted: #8a94a6;
+    --accent: #4ea1ff;
+    --ok: #58c47a;
+    --warn: #e0a339;
+    --danger: #e46464;
+    --running: #4ea1ff;
+    --pending: #8a94a6;
+    --failed: #e46464;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 14px/1.5 "Segoe UI", "Microsoft JhengHei", -apple-system, sans-serif;
+  }
+  header {
+    padding: 14px 20px;
+    background: var(--panel);
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+  header h1 { margin: 0; font-size: 18px; font-weight: 600; }
+  header .meta { color: var(--muted); font-size: 12px; }
+  header a { color: var(--accent); text-decoration: none; }
+  main {
+    padding: 14px;
+    max-width: 1600px;
+    margin: 0 auto;
+  }
+  section {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 14px 16px;
+    margin-bottom: 14px;
+  }
+  section h2 {
+    margin: 0 0 10px;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  .filter-row { display: flex; gap: 8px; align-items: center; margin-bottom: 12px; flex-wrap: wrap; }
+  .filter-row label { color: var(--muted); }
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    cursor: pointer;
+    user-select: none;
+    font-size: 12px;
+  }
+  .chip.active { background: #1a4a7a; border-color: #2a6ba8; color: #fff; }
+  .chip .n { color: var(--muted); font-variant-numeric: tabular-nums; }
+  .chip.active .n { color: #e6e8ee; }
+
+  .table-wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+  th, td { padding: 6px 8px; text-align: left; border-bottom: 1px solid var(--border); vertical-align: middle; }
+  th { color: var(--muted); font-weight: 500; font-size: 12px; background: var(--panel); position: sticky; top: 0; z-index: 1; }
+  td.n { text-align: right; }
+  td.c { text-align: center; }
+
+  .status-badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 600;
+    min-width: 52px;
+    text-align: center;
+  }
+  .status-badge.running { background: #1a3a5e; color: var(--running); }
+  .status-badge.pending { background: #2a2f3a; color: var(--pending); }
+  .status-badge.failed  { background: #3a2020; color: var(--failed); }
+
+  .channel-cell { display: flex; align-items: center; gap: 8px; min-width: 220px; }
+  .channel-cell img {
+    width: 28px; height: 28px; border-radius: 50%; flex-shrink: 0;
+    background: var(--panel-2); object-fit: cover;
+  }
+  .channel-cell .name { font-weight: 500; }
+  .channel-cell .id   { color: var(--muted); font-size: 11px; font-family: Consolas, monospace; }
+  .channel-cell a { color: inherit; text-decoration: none; }
+  .channel-cell a:hover .name { text-decoration: underline; }
+
+  .kind-label { color: var(--text); font-size: 13px; }
+  .priority-hi { color: var(--warn); font-weight: 600; }
+  .video-link { color: var(--accent); text-decoration: none; font-family: Consolas, monospace; font-size: 12px; }
+  .video-link:hover { text-decoration: underline; }
+  .err {
+    color: var(--danger);
+    font-size: 11px;
+    max-width: 320px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    display: block;
+  }
+  .time { color: var(--muted); font-size: 11px; white-space: nowrap; }
+
+  button.act {
+    background: var(--panel-2);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 3px 8px;
+    font: inherit;
+    font-size: 12px;
+    cursor: pointer;
+  }
+  button.act:hover:not(:disabled) { background: #262b36; border-color: #3a414f; }
+  button.act:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  .empty { text-align: center; color: var(--muted); padding: 24px; }
+
+  ul.done-list { list-style: none; padding: 0; margin: 0; }
+  ul.done-list li {
+    padding: 6px 4px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    font-size: 13px;
+  }
+  ul.done-list li:last-child { border-bottom: none; }
+  ul.done-list .time { min-width: 100px; }
+
+  .toast {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--accent);
+    border-radius: 6px;
+    padding: 10px 14px;
+    max-width: 400px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+    opacity: 0;
+    transform: translateY(10px);
+    transition: opacity 0.2s, transform 0.2s;
+    pointer-events: none;
+  }
+  .toast.show { opacity: 1; transform: translateY(0); }
+  .toast.error { border-left-color: var(--danger); }
+  .toast.ok { border-left-color: var(--ok); }
+</style>
+</head>
+<body>
+<header>
+  <h1>爬蟲佇列明細</h1>
+  <div class="meta">
+    <a href="/">← 回管理台</a>
+    &nbsp;&nbsp;<span id="lastUpdated">尚未更新</span>
+  </div>
+</header>
+<main>
+  <section>
+    <div class="filter-row">
+      <label>顯示：</label>
+      <span class="chip active" data-filter="all">全部 <span class="n" id="cAll">0</span></span>
+      <span class="chip" data-filter="running">執行中 <span class="n" id="cRunning">0</span></span>
+      <span class="chip" data-filter="pending">待處理 <span class="n" id="cPending">0</span></span>
+      <span class="chip" data-filter="failed">失敗 <span class="n" id="cFailed">0</span></span>
+    </div>
+    <div class="table-wrap">
+      <table id="taskTable">
+        <thead>
+          <tr>
+            <th>狀態</th>
+            <th>動作</th>
+            <th>頻道</th>
+            <th>影片</th>
+            <th class="c">優先</th>
+            <th class="c">嘗試</th>
+            <th>加入時間</th>
+            <th>錯誤</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="taskBody">
+          <tr><td colspan="9" class="empty">載入中…</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <h2>最近完成 20 筆</h2>
+    <ul class="done-list" id="doneList">
+      <li class="empty" style="border:none;">載入中…</li>
+    </ul>
+  </section>
+</main>
+<div class="toast" id="toast"></div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+let toastTimer = null;
+function toast(message, kind) {
+  const el = $("toast");
+  el.className = "toast show " + (kind || "");
+  el.textContent = message;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { el.className = "toast " + (kind || ""); }, 3500);
+}
+
+async function api(path, opts) {
+  const resp = await fetch(path, opts);
+  const text = await resp.text();
+  let data = null;
+  try { data = text ? JSON.parse(text) : null; } catch { /* not json */ }
+  if (!resp.ok) {
+    const msg = (data && (data.error || data.message)) || `HTTP ${resp.status}`;
+    throw new Error(msg);
+  }
+  return data;
+}
+async function post(path, body) {
+  return api(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: body ? JSON.stringify(body) : "",
+  });
+}
+
+const KIND_LABELS = {
+  "list_videos": "整理直播清單",
+  "fetch_chat": "讀取聊天室紀錄",
+  "check_qualification": "確認頻道資格",
+};
+const STATUS_LABELS = { pending: "待處理", running: "執行中", failed: "失敗", done: "完成" };
+
+let currentFilter = "all";
+let latestTasks = [];
+
+function fmtTime(iso) {
+  if (!iso) return "";
+  return iso.slice(5, 16).replace("T", " ");
+}
+function esc(s) {
+  if (s == null) return "";
+  return String(s).replace(/[&<>"']/g, (c) => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
+}
+
+function renderTasks() {
+  const tbody = $("taskBody");
+  const list = currentFilter === "all"
+    ? latestTasks
+    : latestTasks.filter((t) => t.status === currentFilter);
+  if (list.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="9" class="empty">沒有符合的任務</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = list.map((t) => {
+    const displayName = esc(t.channel_title || t.channel_handle || t.channel_id || "—");
+    const chId = esc(t.channel_id || "");
+    const thumb = t.channel_thumbnail
+      ? `<img src="${esc(t.channel_thumbnail)}" alt="" loading="lazy" onerror="this.style.visibility='hidden'">`
+      : `<img alt="" style="visibility:hidden;">`;
+    const videoCell = t.video_id
+      ? `<a class="video-link" target="_blank" rel="noopener" href="https://www.youtube.com/watch?v=${esc(t.video_id)}">${esc(t.video_id)}</a>`
+      : "";
+    const priority = t.priority > 0 ? `<span class="priority-hi">${t.priority}</span>` : "—";
+    const err = t.last_error
+      ? `<span class="err" title="${esc(t.last_error)}">${esc(t.last_error)}</span>`
+      : "";
+    const canRequeue = t.channel_id && (t.kind === "list_videos" || t.kind === "fetch_chat");
+    const btn = canRequeue
+      ? `<button class="act" data-requeue="${chId}">重抓影片列表</button>`
+      : "";
+    return `
+      <tr>
+        <td><span class="status-badge ${t.status}">${STATUS_LABELS[t.status] || t.status}</span></td>
+        <td class="kind-label">${esc(KIND_LABELS[t.kind] || t.kind)}</td>
+        <td>
+          <div class="channel-cell">
+            ${thumb}
+            <div>
+              <div class="name">${displayName}</div>
+              <div class="id">${chId}</div>
+            </div>
+          </div>
+        </td>
+        <td>${videoCell}</td>
+        <td class="c">${priority}</td>
+        <td class="c">${t.attempts ?? 0}</td>
+        <td class="time">${fmtTime(t.created_at)}</td>
+        <td>${err}</td>
+        <td>${btn}</td>
+      </tr>`;
+  }).join("");
+}
+
+function renderDone(items) {
+  const ul = $("doneList");
+  if (!items || items.length === 0) {
+    ul.innerHTML = `<li class="empty" style="border:none;">還沒有完成的任務</li>`;
+    return;
+  }
+  ul.innerHTML = items.map((t) => {
+    const displayName = esc(t.channel_title || t.channel_handle || t.channel_id || "—");
+    const video = t.video_id
+      ? ` <a class="video-link" target="_blank" rel="noopener" href="https://www.youtube.com/watch?v=${esc(t.video_id)}">${esc(t.video_id)}</a>`
+      : "";
+    return `<li>
+      <span class="time">${fmtTime(t.updated_at)}</span>
+      <span class="kind-label">${esc(KIND_LABELS[t.kind] || t.kind)}</span>
+      <span>${displayName}</span>
+      ${video}
+    </li>`;
+  }).join("");
+}
+
+function updateCounts() {
+  let all = 0, r = 0, p = 0, f = 0;
+  for (const t of latestTasks) {
+    all++;
+    if (t.status === "running") r++;
+    else if (t.status === "pending") p++;
+    else if (t.status === "failed") f++;
+  }
+  $("cAll").textContent = all;
+  $("cRunning").textContent = r;
+  $("cPending").textContent = p;
+  $("cFailed").textContent = f;
+}
+
+async function refresh() {
+  try {
+    const d = await api("/api/admin/queue");
+    latestTasks = d.tasks || [];
+    updateCounts();
+    renderTasks();
+    renderDone(d.recent_done || []);
+    $("lastUpdated").textContent = "最近更新 " + new Date().toLocaleTimeString();
+  } catch (e) {
+    $("lastUpdated").textContent = "更新失敗：" + e.message;
+  }
+}
+
+function bind() {
+  document.querySelectorAll(".chip[data-filter]").forEach((el) => {
+    el.onclick = () => {
+      currentFilter = el.dataset.filter;
+      document.querySelectorAll(".chip[data-filter]").forEach((x) => x.classList.remove("active"));
+      el.classList.add("active");
+      renderTasks();
+    };
+  });
+
+  $("taskBody").addEventListener("click", async (ev) => {
+    const btn = ev.target.closest("button[data-requeue]");
+    if (!btn) return;
+    const id = btn.dataset.requeue;
+    if (!id) return;
+    if (!confirm(`確定要重抓 ${id} 的影片列表嗎？`)) return;
+    btn.disabled = true;
+    try {
+      const r = await post("/api/admin/enqueue/list_videos", { channel_id: id });
+      toast(r.message, "ok");
+      refresh();
+    } catch (e) {
+      toast(e.message, "error");
+      btn.disabled = false;
+    }
+  });
+}
+
+bind();
+refresh();
+setInterval(refresh, 10_000);
+</script>
+</body>
+</html>
