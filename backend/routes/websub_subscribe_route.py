@@ -15,6 +15,10 @@ from utils.cloud_tasks_client import dispatch_tasks_batch
 
 websub_subscribe_bp = APIBlueprint("websub_subscribe", __name__, tag="WebSub")
 HUB_URL = "https://pubsubhubbub.appspot.com/subscribe"
+# hub 正常時 1 秒內回 202；故障時會卡約 20 秒才回 503，等它只是白白佔用運算時間
+HUB_TIMEOUT_SECONDS = 5
+# 派發前探測 hub 的頻道數上限，全部失敗才判定 hub 故障
+HUB_PROBE_LIMIT = 3
 
 
 def _get_callback_url() -> str:
@@ -49,7 +53,7 @@ def subscribe_channel_by_id(channel_id: str) -> bool:
 
     logging.info(f"📡 單獨訂閱頻道：{channel_id}")
     try:
-        response = requests.post(HUB_URL, data=payload, timeout=10)
+        response = requests.post(HUB_URL, data=payload, timeout=HUB_TIMEOUT_SECONDS)
         if response.status_code == 202:
             logging.info(f"✅ 訂閱成功：{channel_id}")
             return True
@@ -59,6 +63,21 @@ def subscribe_channel_by_id(channel_id: str) -> bool:
     except requests.exceptions.RequestException:
         logging.error(f"🔥 單筆訂閱發生例外：{channel_id}", exc_info=True)
         return False
+
+
+def _probe_hub(channel_ids: list[str]) -> tuple[bool, str | None]:
+    """
+    派發前確認 hub 是否正常：依序對前幾個頻道做真實訂閱（本來就要續訂，重複訂閱無副作用）。
+
+    hub 故障時每個請求都會卡到逾時，整輪派發加上 Cloud Tasks 重試只會燒運算時間，
+    幾乎沒有頻道能訂閱成功。所以探測全部失敗就由呼叫端略過本輪，等下一次排程再試。
+
+    回傳 (hub 是否正常, 探測時已訂閱成功、不需再派發的 channel_id)
+    """
+    for channel_id in channel_ids[:HUB_PROBE_LIMIT]:
+        if subscribe_channel_by_id(channel_id):
+            return True, channel_id
+    return False, None
 
 
 def _log_job_result(db: Client, job_name: str, result: dict):
@@ -95,6 +114,7 @@ def init_websub_subscribe_route(app, db: Client):
         """
         讀取所有頻道，透過 Cloud Tasks 非同步派發訂閱任務。
         每個頻道獨立一個 task，不會因為數量多而 timeout。
+        派發前會先探測 hub，故障時略過本輪並回 502。
         """
         start_time = time.monotonic()
         result = {
@@ -133,6 +153,23 @@ def init_websub_subscribe_route(app, db: Client):
 
             result["total_channels"] = len(channels)
 
+            # 派發前先探測 hub，故障就略過本輪（理由見 _probe_hub）
+            hub_ok, probed_channel_id = _probe_hub([p["channel_id"] for p in valid_params])
+            if valid_params and not hub_ok:
+                result["duration_seconds"] = round(time.monotonic() - start_time, 2)
+                result["status"] = "skipped"
+                result["message"] = (
+                    f"WebSub hub 連續 {min(HUB_PROBE_LIMIT, len(valid_params))} 次訂閱失敗，"
+                    "判定 hub 故障，略過本輪派發"
+                )
+                logging.error(f"🚫 websub subscribe-all：{result['message']}")
+                _log_job_result(db, "websub-subscribe-all", result)
+                # 回 502 讓 Cloud Scheduler 把這次執行標為失敗，方便從排程紀錄看出 hub 故障
+                return jsonify(result), 502
+
+            # 探測時已訂閱成功的頻道不需要再派發
+            valid_params = [p for p in valid_params if p["channel_id"] != probed_channel_id]
+
             logging.info(
                 f"📤 websub subscribe-all：準備派發 {len(valid_params)} 個 "
                 f"Cloud Tasks（CALLBACK_URL={callback_url}）"
@@ -148,9 +185,10 @@ def init_websub_subscribe_route(app, db: Client):
 
             result["duration_seconds"] = round(time.monotonic() - start_time, 2)
             result["status"] = "success" if result["failed"] == 0 else "partial"
-            result["message"] = (
-                f"已派發 {result['dispatched']} 個訂閱任務，失敗 {result['failed']} 個"
-            )
+            message = f"已派發 {result['dispatched']} 個訂閱任務，失敗 {result['failed']} 個"
+            if probed_channel_id:
+                message += "，另有 1 個頻道於探測 hub 時直接訂閱完成"
+            result["message"] = message
 
             logging.info(f"✅ websub subscribe-all 完成：{result}")
             _log_job_result(db, "websub-subscribe-all", result)
