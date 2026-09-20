@@ -15,7 +15,12 @@ import pytest
 import responses
 from conftest import create_test_app
 
-from routes.websub_subscribe_route import HUB_URL, subscribe_channel_by_id
+from routes.websub_subscribe_route import (
+    HUB_PROBE_LIMIT,
+    HUB_TIMEOUT_SECONDS,
+    HUB_URL,
+    subscribe_channel_by_id,
+)
 
 ADMIN_KEY = os.environ["ADMIN_API_KEY"]
 ADMIN_HEADERS = {"Authorization": f"Bearer {ADMIN_KEY}"}
@@ -78,6 +83,34 @@ class TestSubscribeChannelById:
         assert subscribe_channel_by_id("UCxxxxxxxxxxxxxxxxxxxxxx") is False
 
     @responses.activate
+    @patch.dict(os.environ, {"WEBSUB_CALLBACK_URL": "https://example.com/websub"})
+    def test_read_timeout_returns_false(self):
+        """hub 故障時的實際樣貌：連得上但遲遲不回應"""
+        from requests.exceptions import ReadTimeout
+
+        responses.add(responses.POST, HUB_URL, body=ReadTimeout("read timed out"))
+        assert subscribe_channel_by_id("UCxxxxxxxxxxxxxxxxxxxxxx") is False
+
+    @responses.activate
+    @patch.dict(os.environ, {"WEBSUB_CALLBACK_URL": "https://example.com/websub"})
+    def test_hub_503_returns_false(self):
+        responses.add(
+            responses.POST,
+            HUB_URL,
+            body="Transient error; please try again later",
+            status=503,
+        )
+        assert subscribe_channel_by_id("UCxxxxxxxxxxxxxxxxxxxxxx") is False
+
+    @patch("routes.websub_subscribe_route.requests.post")
+    @patch.dict(os.environ, {"WEBSUB_CALLBACK_URL": "https://example.com/websub"})
+    def test_uses_short_timeout(self, mock_post):
+        """逾時直接決定 hub 故障時每次失敗佔用多久運算時間，不能退回長逾時"""
+        mock_post.return_value.status_code = 202
+        assert subscribe_channel_by_id("UCxxxxxxxxxxxxxxxxxxxxxx") is True
+        assert mock_post.call_args.kwargs["timeout"] == HUB_TIMEOUT_SECONDS
+
+    @responses.activate
     @patch.dict(
         os.environ,
         {"WEBSUB_CALLBACK_URL": "https://example.com/websub", "WEBSUB_SECRET": "my-secret"},
@@ -105,9 +138,10 @@ class TestSubscribeAll:
         )
         assert resp.status_code == 400
 
+    @patch("routes.websub_subscribe_route.subscribe_channel_by_id")
     @patch("routes.websub_subscribe_route.dispatch_tasks_batch")
     @patch.dict(os.environ, {"WEBSUB_CALLBACK_URL": "https://example.com/websub"})
-    def test_dispatches_tasks_for_channels(self, mock_dispatch, db, websub_client):
+    def test_dispatches_tasks_for_channels(self, mock_dispatch, mock_sub, db, websub_client):
         # 在 Firestore emulator 寫入 channel_sync_index
         db.collection("channel_sync_index").document("index_list").set(
             {
@@ -117,7 +151,8 @@ class TestSubscribeAll:
                 ]
             }
         )
-        mock_dispatch.return_value = {"dispatched": 2, "failed": 0}
+        mock_sub.return_value = True
+        mock_dispatch.return_value = {"dispatched": 1, "failed": 0}
 
         resp = websub_client.post(
             "/api/websub/subscribe-all",
@@ -125,12 +160,86 @@ class TestSubscribeAll:
         )
         assert resp.status_code == 200
         data = resp.get_json()
-        assert data["dispatched"] == 2
+        assert data["dispatched"] == 1
         assert data["status"] == "success"
+
+        # 第一個頻道探測時已訂閱成功，hub 正常就不再探測，只派發剩下的頻道
+        mock_sub.assert_called_once_with("UC_CH_001")
+        mock_dispatch.assert_called_once_with(
+            "/api/websub/subscribe-one",
+            params_list=[{"channel_id": "UC_CH_002"}],
+        )
 
         # 驗證 job log 也寫入了 Firestore
         logs = list(db.collection("scheduler_job_logs").limit(10).stream())
         assert len(logs) >= 1
+
+    @patch("routes.websub_subscribe_route.subscribe_channel_by_id")
+    @patch("routes.websub_subscribe_route.dispatch_tasks_batch")
+    @patch.dict(os.environ, {"WEBSUB_CALLBACK_URL": "https://example.com/websub"})
+    def test_failed_probe_channel_is_still_dispatched(
+        self, mock_dispatch, mock_sub, db, websub_client
+    ):
+        db.collection("channel_sync_index").document("index_list").set(
+            {
+                "channels": [
+                    {"channel_id": "UC_CH_001"},
+                    {"channel_id": "UC_CH_002"},
+                    {"channel_id": "UC_CH_003"},
+                ]
+            }
+        )
+        # 第一個探測失敗、第二個成功：hub 視為正常，失敗的那個交給 Cloud Tasks 重試
+        mock_sub.side_effect = [False, True]
+        mock_dispatch.return_value = {"dispatched": 2, "failed": 0}
+
+        resp = websub_client.post("/api/websub/subscribe-all", headers=ADMIN_HEADERS)
+
+        assert resp.status_code == 200
+        assert mock_sub.call_count == 2
+        mock_dispatch.assert_called_once_with(
+            "/api/websub/subscribe-one",
+            params_list=[{"channel_id": "UC_CH_001"}, {"channel_id": "UC_CH_003"}],
+        )
+
+    @patch("routes.websub_subscribe_route.subscribe_channel_by_id")
+    @patch("routes.websub_subscribe_route.dispatch_tasks_batch")
+    @patch.dict(os.environ, {"WEBSUB_CALLBACK_URL": "https://example.com/websub"})
+    def test_hub_down_skips_dispatch(self, mock_dispatch, mock_sub, db, websub_client):
+        db.collection("channel_sync_index").document("index_list").set(
+            {"channels": [{"channel_id": f"UC_CH_{i:03d}"} for i in range(10)]}
+        )
+        mock_sub.return_value = False
+
+        resp = websub_client.post("/api/websub/subscribe-all", headers=ADMIN_HEADERS)
+
+        assert resp.status_code == 502
+        data = resp.get_json()
+        assert data["status"] == "skipped"
+        assert data["dispatched"] == 0
+        # 只探測前幾個頻道就停手，不會把整份清單都打一遍
+        assert mock_sub.call_count == HUB_PROBE_LIMIT
+        mock_dispatch.assert_not_called()
+
+        logs = [d.to_dict() for d in db.collection("scheduler_job_logs").stream()]
+        assert [log["status"] for log in logs] == ["skipped"]
+
+    @patch("routes.websub_subscribe_route.subscribe_channel_by_id")
+    @patch("routes.websub_subscribe_route.dispatch_tasks_batch")
+    @patch.dict(os.environ, {"WEBSUB_CALLBACK_URL": "https://example.com/websub"})
+    def test_hub_down_with_fewer_channels_than_probe_limit(
+        self, mock_dispatch, mock_sub, db, websub_client
+    ):
+        db.collection("channel_sync_index").document("index_list").set(
+            {"channels": [{"channel_id": "UC_CH_001"}]}
+        )
+        mock_sub.return_value = False
+
+        resp = websub_client.post("/api/websub/subscribe-all", headers=ADMIN_HEADERS)
+
+        assert resp.status_code == 502
+        assert mock_sub.call_count == 1
+        mock_dispatch.assert_not_called()
 
     @patch.dict(os.environ, {"WEBSUB_CALLBACK_URL": "https://example.com/websub"})
     def test_empty_channels_returns_400(self, db, websub_client):
