@@ -79,3 +79,10 @@ const apiUrl = import.meta.env.VITE_API_BASE;
 | `npm run build`   | `.env.production` + `.env.production.local` | 預設關閉 `/settings`，登入後視程式判斷是否顯示 |
 
 ---
+## 🔀 功能開關
+
+| 變數 | 說明 | staging | production |
+|------|------|---------|------------|
+| `VITE_ENABLE_NETWORK` | 側欄是否顯示「關係網路」入口，值為 `"true"` 才顯示 | `true` | `false` |
+
+---

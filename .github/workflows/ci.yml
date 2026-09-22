@@ -158,3 +158,4 @@ jobs:
           VITE_GOOGLE_CLIENT_ID: dummy
           VITE_API_BASE: https://dummy.run.app
           VITE_ENABLE_SETTINGS: "false"
+          VITE_ENABLE_NETWORK: "false"

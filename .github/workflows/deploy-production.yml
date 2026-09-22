@@ -45,6 +45,7 @@ jobs:
           VITE_GOOGLE_REDIRECT_URI: ${{ vars.PROD_GOOGLE_REDIRECT_URI }}
           VITE_API_BASE: ""
           VITE_ENABLE_SETTINGS: "false"
+          VITE_ENABLE_NETWORK: "false"
           VITE_ADMIN_CHANNEL_ID: ${{ vars.PROD_INPUT_CHANNEL }}
           VITE_GA_MEASUREMENT_ID: G-Q2S0XSEW74
 

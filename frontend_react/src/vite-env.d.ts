@@ -5,6 +5,7 @@ interface ImportMetaEnv {
   readonly VITE_API_BASE: string;
   readonly VITE_GA_MEASUREMENT_ID: string;
   readonly VITE_ENABLE_SETTINGS: string;
+  readonly VITE_ENABLE_NETWORK: string;
 }
 
 interface ImportMeta {
