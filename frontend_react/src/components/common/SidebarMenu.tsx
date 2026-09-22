@@ -16,6 +16,9 @@ interface Props {
   onItemClick?: () => void;
 }
 
+/** 關係網路功能尚未在 production 開放，入口由 VITE_ENABLE_NETWORK 控制（staging 開、production 關） */
+const NETWORK_ENABLED = import.meta.env.VITE_ENABLE_NETWORK === "true";
+
 const SidebarMenu = ({ collapsed, setCollapsed: _setCollapsed, isMobile = false, onItemClick = undefined }: Props) => {
   const { data: user } = useMyChannelId();
   const isLoggedIn = !!user?.channelId;
@@ -36,11 +39,15 @@ const SidebarMenu = ({ collapsed, setCollapsed: _setCollapsed, isMobile = false,
       icon: <FaUser className="w-5 h-5" />,
       to: "/channels",
     },
-    {
-      label: "關係網路",
-      icon: <FaProjectDiagram className="w-5 h-5" />,
-      to: "/network",
-    },
+    ...(NETWORK_ENABLED
+      ? [
+          {
+            label: "關係網路",
+            icon: <FaProjectDiagram className="w-5 h-5" />,
+            to: "/network",
+          },
+        ]
+      : []),
     {
       label: "分類總表｜遊戲",
       icon: <FaClipboardList className="w-5 h-5" />,

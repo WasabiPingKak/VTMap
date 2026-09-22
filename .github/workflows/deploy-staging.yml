@@ -77,6 +77,7 @@ jobs:
           VITE_GOOGLE_REDIRECT_URI: ${{ vars.STAGING_GOOGLE_REDIRECT_URI }}
           VITE_API_BASE: ""
           VITE_ENABLE_SETTINGS: "true"
+          VITE_ENABLE_NETWORK: "true"
           VITE_DEFAULT_CHANNEL_ID: ${{ vars.STAGING_INPUT_CHANNEL }}
 
       - uses: actions/upload-artifact@v7
