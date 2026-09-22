@@ -6,6 +6,7 @@ import LiveRedirectSection from "@/components/live_redirect/LiveRedirectSection"
 import MainLayout from "../components/layout/MainLayout";
 import FlagGroupingToggle from "@/components/channels/FlagGroupingToggle";
 import LiveRedirectHelpModal from "@/components/live_redirect/LiveRedirectHelpModal";
+import LiveNoticeBanner from "@/components/live_redirect/LiveNoticeBanner";
 import { PiAirplaneLandingFill } from "react-icons/pi";
 import { FaInfoCircle } from "react-icons/fa";
 import LiveTopicFilterPanel from "@/components/live_redirect/LiveTopicFilterPanel";
@@ -69,6 +70,9 @@ export default function LiveRedirectPage() {
           <PiAirplaneLandingFill className="w-6 h-6 " />
           降落轉機塔臺
         </h1>
+
+        {/* 臨時公告：YouTube 開台通知不穩定，可關閉 */}
+        <LiveNoticeBanner />
 
         {/* 說明按鈕 */}
         <button
