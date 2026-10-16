@@ -93,10 +93,17 @@ class TestLiveAndPremiere:
         d = classify_for_notify(make_item(duration="P0D", live=live), NOW)
         assert (d.action, d.kind, d.label) == (ACTION_NOTIFY, KIND_LIVE, LABEL_LIVE)
 
-    def test_premiere_started_counts_as_video(self):
+    def test_premiere_started_goes_to_live_with_premiere_label(self):
+        """首播開始一律走直播通知，片長可辨識時 {type} 顯示首播"""
         live = {"actualStartTime": _iso(NOW - timedelta(minutes=1))}
         d = classify_for_notify(make_item(duration="PT8M", live=live), NOW)
-        assert (d.action, d.kind, d.label) == (ACTION_NOTIFY, KIND_VIDEO, LABEL_PREMIERE)
+        assert (d.action, d.kind, d.label) == (ACTION_NOTIFY, KIND_LIVE, LABEL_PREMIERE)
+
+    def test_premiere_started_with_zero_duration_is_live(self):
+        """實測首播待機室片長也是 P0D，此時與直播無法區分"""
+        live = {"actualStartTime": _iso(NOW - timedelta(minutes=1))}
+        d = classify_for_notify(make_item(duration="P0D", live=live), NOW)
+        assert (d.action, d.kind, d.label) == (ACTION_NOTIFY, KIND_LIVE, LABEL_LIVE)
 
     def test_live_started_long_ago_skipped(self):
         live = {"actualStartTime": _iso(NOW - timedelta(hours=5))}
@@ -128,9 +135,25 @@ class TestIsShortsUrl:
         assert mock_head.call_args.kwargs["allow_redirects"] is False
 
     @patch("services.discord_notify.classifier.requests.head")
-    def test_redirect_is_not_shorts(self, mock_head):
-        mock_head.return_value = MagicMock(status_code=303)
+    def test_redirect_to_watch_is_not_shorts(self, mock_head):
+        mock_head.return_value = MagicMock(
+            status_code=303, headers={"Location": "https://www.youtube.com/watch?v=vid1"}
+        )
         assert _is_shorts_url("vid1") is False
+
+    @patch("services.discord_notify.classifier.requests.head")
+    def test_redirect_to_bot_check_is_unknown(self, mock_head):
+        """被 YouTube 擋下時會轉到 google.com/sorry，不能當成一般影片"""
+        mock_head.return_value = MagicMock(
+            status_code=302,
+            headers={"Location": "https://www.google.com/sorry/index?continue=..."},
+        )
+        assert _is_shorts_url("vid1") is None
+
+    @patch("services.discord_notify.classifier._is_shorts_url", return_value=None)
+    def test_blocked_check_keeps_short_video_as_shorts(self, _mock):
+        d = classify_for_notify(make_item(duration="PT40S"), NOW)
+        assert d.label == LABEL_SHORTS
 
     @patch("services.discord_notify.classifier.requests.head")
     def test_request_error_returns_none(self, mock_head):

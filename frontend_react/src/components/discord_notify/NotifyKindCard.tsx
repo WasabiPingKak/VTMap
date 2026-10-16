@@ -12,12 +12,12 @@ import {
 const KIND_TEXT: Record<NotifyKind, { title: string; description: string; sampleType: string }> = {
   live: {
     title: "直播開台",
-    description: "直播開始的時候發送。待機室建立時不會發。",
+    description: "直播或首播開始的時候發送。待機室建立時不會發。",
     sampleType: "直播",
   },
   video: {
     title: "影片",
-    description: "上傳長片、Shorts，或首播開始的時候發送。",
+    description: "上傳長片或 Shorts 的時候發送。首播會發在直播開台那邊。",
     sampleType: "影片",
   },
 };
