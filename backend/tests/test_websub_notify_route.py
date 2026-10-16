@@ -103,3 +103,27 @@ class TestWebSubPostNotification:
                 headers={"X-Hub-Signature": sig},
             )
             assert resp.status_code == 204
+
+
+class TestWebSubDiscordEnqueue:
+    """有開 Discord 通知的頻道，推播時排入 discord_notify_queue"""
+
+    def _post(self, client):
+        return client.post("/websub-callback", data=SAMPLE_XML, content_type="application/atom+xml")
+
+    def test_enabled_channel_enqueued(self, db, websub_client):
+        from services.discord_notify.config_store import update_kind_config
+
+        update_kind_config(
+            db, "UCuAXFkgsw1L7xaCfnd5JJOw", "video", {"enabled": True, "discord_channel_id": "9"}
+        )
+        assert self._post(websub_client).status_code == 204
+        assert db.collection("discord_notify_queue").document("dQw4w9WgXcQ").get().exists
+
+    def test_disabled_channel_not_enqueued(self, db, websub_client):
+        assert self._post(websub_client).status_code == 204
+        assert not db.collection("discord_notify_queue").document("dQw4w9WgXcQ").get().exists
+
+    def test_enqueue_failure_does_not_break_callback(self, db, websub_client):
+        with patch("routes.websub_notify_route.is_notify_enabled", side_effect=RuntimeError("x")):
+            assert self._post(websub_client).status_code == 204

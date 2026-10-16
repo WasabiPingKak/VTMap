@@ -15,6 +15,7 @@ import MainLayout from "../components/layout/MainLayout";
 import { Link, useNavigate } from "react-router-dom";
 import { toast } from "react-hot-toast";
 import { MdAnalytics } from "react-icons/md";
+import { FaDiscord } from "react-icons/fa";
 import { apiPost } from "@/lib/api";
 
 export default function MySettingsPage() {
@@ -126,6 +127,18 @@ export default function MySettingsPage() {
                 查看我的頻道頁面
               </Link>
             </div>
+
+            {me?.isAdmin && (
+              <div className="bg-gray-50 dark:bg-zinc-800 border border-gray-300 dark:border-zinc-600 rounded px-4 py-3">
+                <Link
+                  to="/discord-notify"
+                  className="flex items-center gap-2 text-sm text-gray-800 dark:text-gray-100 font-bold underline"
+                >
+                  <FaDiscord className="w-5 h-5" />
+                  Discord 開台與新影片通知
+                </Link>
+              </div>
+            )}
           </div>
         )}
 

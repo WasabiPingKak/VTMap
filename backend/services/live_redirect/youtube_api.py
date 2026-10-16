@@ -26,7 +26,10 @@ def _fetch_with_retry(params: dict) -> list[dict]:
     return resp.json().get("items", [])  # type: ignore[no-any-return]
 
 
-def batch_fetch_video_details(video_ids: list[str]) -> list[dict]:
+DEFAULT_PARTS = "snippet,liveStreamingDetails,status"
+
+
+def batch_fetch_video_details(video_ids: list[str], parts: str = DEFAULT_PARTS) -> list[dict]:
     api_key = _get_api_key()
     if not api_key:
         logging.error("❌ 環境變數 API_KEY 未設定")
@@ -37,7 +40,7 @@ def batch_fetch_video_details(video_ids: list[str]) -> list[dict]:
     for i in range(0, len(video_ids), 50):
         batch = video_ids[i : i + 50]
         params = {
-            "part": "snippet,liveStreamingDetails,status",
+            "part": parts,
             "id": ",".join(batch),
             "key": api_key,
         }

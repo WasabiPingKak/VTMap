@@ -16,7 +16,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 │   │   ├── trending/          # Trending channel/game analytics
 │   │   ├── live_redirect/     # Live stream caching and routing
 │   │   ├── heatmap/           # Active time visualization
-│   │   └── network/           # VTuber 關係網路查詢（Supabase Postgres）
+│   │   ├── network/           # VTuber 關係網路查詢（Supabase Postgres）
+│   │   └── discord_notify/    # Discord 開台與新影片通知（見該目錄 README）
 │   ├── crawler/               # 關係網路爬蟲 CLI（本機執行，見 crawler/README.md）
 │   └── utils/                 # Shared utilities
 │

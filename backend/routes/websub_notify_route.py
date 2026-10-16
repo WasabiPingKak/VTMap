@@ -9,6 +9,9 @@ from defusedxml.ElementTree import fromstring as safe_xml_fromstring
 from flask import Response, request
 from google.cloud.firestore import Client
 
+from services.discord_notify.config_store import is_notify_enabled
+from services.discord_notify.processor import enqueue_video
+
 websub_notify_bp = APIBlueprint("websub_notify", __name__, tag="WebSub")
 COLLECTION_NAME = "live_redirect_notifications"
 
@@ -16,6 +19,16 @@ COLLECTION_NAME = "live_redirect_notifications"
 def _write_notify_item(db: Client, doc_id: str, new_item: dict):
     """直接寫入單筆 WebSub 通知，每筆通知為獨立 document，無需 transaction"""
     db.collection(COLLECTION_NAME).document(doc_id).set(new_item, merge=True)
+
+
+def _enqueue_discord_notify(db: Client, video_id: str, channel_id: str, now: datetime):
+    """有開 Discord 通知的頻道，排入通知佇列。失敗不影響原本的推播處理"""
+    try:
+        if is_notify_enabled(db, channel_id):
+            enqueue_video(db, video_id, channel_id, now)
+            logging.info(f"📨 已排入 Discord 通知佇列：{video_id}")
+    except Exception:
+        logging.error(f"🔥 排入 Discord 通知佇列失敗：{video_id}", exc_info=True)
 
 
 def init_websub_notify_route(app, db: Client):
@@ -83,6 +96,7 @@ def init_websub_notify_route(app, db: Client):
                         "date": date_str,
                     }
                     _write_notify_item(db, doc_id, new_item)
+                    _enqueue_discord_notify(db, video_id, channel_id, notified_at)
 
                 return Response("OK", status=204)
             except Exception:
