@@ -32,6 +32,7 @@ import DonatePage from "@/pages/DonatePage";
 import ReviewPage from "./pages/ReviewPage";
 import NetworkPage from "./pages/NetworkPage";
 import NetworkQueuePage from "./pages/NetworkQueuePage";
+import DiscordNotifyPage from "./pages/DiscordNotifyPage";
 
 import "flag-icons/css/flag-icons.min.css";
 import "./style.css";
@@ -91,6 +92,7 @@ function AppRoutes() {
         <Route path="/category-aliases" element={<CategoryAliasPage />} />
         <Route path="/changelog" element={<ChangelogPage />} />
         <Route path="/my-settings" element={<MySettingsPage />} />
+        <Route path="/discord-notify" element={<DiscordNotifyPage />} />
         <Route path="/my-category-editor" element={<ChannelCategoryEditorPage />} />
         <Route path="/quick-category-editor/:channelId" element={<QuickCategoryEditorPage />} />
         <Route path="/auth-loading" element={<AuthLoadingPage />} />

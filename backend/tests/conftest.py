@@ -140,6 +140,14 @@ def _clear_revoke_cache():
 
 
 @pytest.fixture(autouse=True)
+def _clear_discord_notify_cache():
+    """每個測試前清空 Discord 通知開關快取，避免跨測試污染"""
+    from services.discord_notify.config_store import _enabled_cache
+
+    _enabled_cache.clear()
+
+
+@pytest.fixture(autouse=True)
 def _reset_breakers():
     """每個測試前重置 circuit breaker 狀態"""
     from utils.breaker_instances import firestore_breaker, youtube_breaker

@@ -20,3 +20,4 @@
 | [ADR-007](007-opentelemetry-cloud-trace.md) | OpenTelemetry 分散式追蹤整合 Cloud Trace | 已採用 |
 | [ADR-008](008-frontend-state-management.md) | 前端狀態管理：Zustand + TanStack Query | 已採用 |
 | [ADR-009](009-mypy-migration.md) | 靜態型別檢查從 pyright 遷移至 mypy | 已採用 |
+| [ADR-011](011-discord-notify-http-only.md) | Discord 開台與新影片通知採用純 HTTP 架構 | 已採用 |
