@@ -32,8 +32,9 @@ SENT_COLLECTION = "discord_notify_sent"
 
 FETCH_PARTS = "snippet,liveStreamingDetails,contentDetails,status"
 
-# 預定時間前 15 分鐘開始檢查待機室（提早開台也抓得到）
-PENDING_LEAD = timedelta(minutes=15)
+# 預定時間前 2 小時開始檢查待機室（實測曾提早 35 分鐘開台）。
+# 每分鐘的查詢會合併成一批，拉長視窗只增加少量 quota
+PENDING_LEAD = timedelta(hours=2)
 # 預定時間過了 6 小時還沒開台，視為放棄的待機室
 PENDING_EXPIRE = timedelta(hours=6)
 # 發送失敗的重試上限（每分鐘一次）

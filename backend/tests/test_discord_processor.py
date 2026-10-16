@@ -145,7 +145,7 @@ class TestWaitingRoom:
     def test_upcoming_moves_to_pending_then_notifies_on_start(
         self, configured, mock_fetch, mock_send
     ):
-        sched = NOW + timedelta(hours=2)
+        sched = NOW + timedelta(hours=5)
         enqueue_video(configured, "live1", CHANNEL, NOW)
         mock_fetch.return_value = [
             video_item("live1", duration="P0D", live={"scheduledStartTime": _iso(sched)})
@@ -157,9 +157,9 @@ class TestWaitingRoom:
         assert not _exists(configured, QUEUE_COLLECTION, "live1")
         mock_send.assert_not_called()
 
-        # 預定時間還很久，不會被查
+        # 預定時間還很久（距離超過 2 小時），不會被查
         mock_fetch.reset_mock()
-        run_tick(configured, NOW + timedelta(minutes=30))
+        run_tick(configured, NOW + timedelta(hours=2))
         mock_fetch.assert_not_called()
 
         # 接近預定時間且已開台
@@ -173,7 +173,22 @@ class TestWaitingRoom:
         assert mock_send.call_args.args[0] == "LIVE_CH"
         assert not _exists(configured, PENDING_COLLECTION, "live1")
 
-    def test_premiere_start_goes_to_video_channel(self, configured, mock_fetch, mock_send):
+    def test_early_start_detected_within_lead_window(self, configured, mock_fetch, mock_send):
+        """實測曾提早 35 分鐘開台，要在開台後一分鐘內發出"""
+        sched = NOW + timedelta(minutes=40)
+        configured.collection(PENDING_COLLECTION).document("e1").set(
+            {"channelId": CHANNEL, "scheduledStart": sched}
+        )
+        mock_fetch.return_value = [
+            video_item("e1", duration="P0D", live={"actualStartTime": _iso(NOW)})
+        ]
+
+        stats = run_tick(configured, NOW + timedelta(minutes=1))
+
+        assert stats["sent"] == 1
+        assert mock_send.call_args.args[0] == "LIVE_CH"
+
+    def test_premiere_start_goes_to_live_channel(self, configured, mock_fetch, mock_send):
         configured.collection(PENDING_COLLECTION).document("p1").set(
             {"channelId": CHANNEL, "scheduledStart": NOW}
         )
@@ -183,8 +198,9 @@ class TestWaitingRoom:
 
         run_tick(configured, NOW + timedelta(minutes=1))
 
-        assert mock_send.call_args.args[0] == "VIDEO_CH"
-        assert "首播" in mock_send.call_args.args[1]
+        assert mock_send.call_args.args[0] == "LIVE_CH"
+        sent = configured.collection(SENT_COLLECTION).document("p1").get().to_dict()
+        assert sent["label"] == "首播"
 
     def test_abandoned_waiting_room_expires(self, configured, mock_fetch, mock_send):
         sched = NOW - timedelta(hours=7)

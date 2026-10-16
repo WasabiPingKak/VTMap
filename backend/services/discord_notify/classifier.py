@@ -64,7 +64,12 @@ def _duration_seconds(item: dict) -> int:
 
 
 def _is_shorts_url(video_id: str) -> bool | None:
-    """對 /shorts/{id} 發 HEAD：200 是 Shorts，被轉址是一般影片。失敗回傳 None。"""
+    """
+    對 /shorts/{id} 發 HEAD：200 是 Shorts，轉址到 /watch 是一般影片，其他情況回傳 None。
+
+    請求太頻繁時 YouTube 會轉址到 google.com/sorry 的機器人驗證頁，
+    那種轉址不代表影片類型，交給呼叫端改用片長判斷。
+    """
     try:
         resp = requests.head(
             f"https://www.youtube.com/shorts/{video_id}", allow_redirects=False, timeout=5
@@ -74,8 +79,12 @@ def _is_shorts_url(video_id: str) -> bool | None:
         return None
     if resp.status_code == 200:
         return True
-    if 300 <= resp.status_code < 400:
+    if 300 <= resp.status_code < 400 and "/watch" in resp.headers.get("Location", ""):
         return False
+    logging.warning(
+        f"⚠️ Shorts 判斷無法確定：{video_id} / {resp.status_code} "
+        f"{resp.headers.get('Location', '')[:80]}"
+    )
     return None
 
 
@@ -94,12 +103,12 @@ def classify_for_notify(item: dict, now: datetime) -> Decision:
 
     - 一般上傳 → 影片通知（長片 / Shorts）
     - 待機室（直播或首播）→ 等待開台
-    - 直播開始 → 直播通知
-    - 首播開始 → 影片通知
+    - 直播或首播開始 → 直播通知
+    - 已結束的首播（推播晚到、開始時沒通知到）→ 影片通知
     - 已結束的直播、私人影片、舊片 → 不處理
 
-    直播與首播都有 liveStreamingDetails，用片長區分：
-    直播待機室與直播中的 duration 是 P0D，首播的影片已經上傳完成，片長不為 0。
+    首播開始時一律走直播通知：首播也有聊天室，對觀眾來說跟開台一樣是「現在進來一起看」。
+    而且待機室與進行中的階段，API 沒有欄位能區分首播與直播（2026-10 實測首播待機室片長也是 P0D）。
     """
     snippet = item.get("snippet", {})
     status = item.get("status", {})
@@ -114,7 +123,6 @@ def classify_for_notify(item: dict, now: datetime) -> Decision:
             return Decision(ACTION_SKIP, reason="發布時間過久，視為舊片")
         return Decision(ACTION_NOTIFY, KIND_VIDEO, _video_label(item))
 
-    is_premiere = _duration_seconds(item) > 0
     actual_start = _parse_time(live_details.get("actualStartTime"))
     actual_end = live_details.get("actualEndTime")
 
@@ -135,9 +143,9 @@ def classify_for_notify(item: dict, now: datetime) -> Decision:
     if actual_start:
         if now - actual_start > LIVE_FRESH_WINDOW:
             return Decision(ACTION_SKIP, reason="開台已久，視為舊通知")
-        if is_premiere:
-            return Decision(ACTION_NOTIFY, KIND_VIDEO, LABEL_PREMIERE)
-        return Decision(ACTION_NOTIFY, KIND_LIVE, LABEL_LIVE)
+        # 首播進行中若片長已不為 0，模板的 {type} 顯示「首播」，否則一律視為直播
+        label = LABEL_PREMIERE if _duration_seconds(item) > 0 else LABEL_LIVE
+        return Decision(ACTION_NOTIFY, KIND_LIVE, label)
 
     scheduled = live_details.get("scheduledStartTime")
     if scheduled:

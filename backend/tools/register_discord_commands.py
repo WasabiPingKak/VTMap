@@ -32,8 +32,8 @@ TYPE_OPTION = {
     "description": "通知類型",
     "required": True,
     "choices": [
-        {"name": "直播開台", "value": "live"},
-        {"name": "影片（長片、Shorts、首播）", "value": "video"},
+        {"name": "直播開台（含首播）", "value": "live"},
+        {"name": "影片（長片、Shorts）", "value": "video"},
     ],
 }
 
