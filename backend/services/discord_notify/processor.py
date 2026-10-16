@@ -14,6 +14,7 @@ from services.discord_notify.classifier import (
     ACTION_NOTIFY,
     ACTION_WAIT,
     KIND_LIVE,
+    KIND_VIDEO,
     LABEL_LIVE,
     LABEL_SHORTS,
     LABEL_VIDEO,
@@ -199,6 +200,13 @@ def run_tick(db: Client, now: datetime) -> dict:
     return stats
 
 
+TEST_NOTICE = {
+    KIND_LIVE: "🔧 **這是測試訊息**，用來確認通知設定，並沒有真的開台。以下是通知的範例：",
+    KIND_VIDEO: "🔧 **這是測試訊息**，用來確認通知設定，並沒有發布新影片。以下是通知的範例：",
+}
+TEST_TITLE = "（範例標題）"
+
+
 def send_test_message(db: Client, channel_id: str, kind: str) -> str:
     """用範例內容發一則測試訊息，回傳 message id"""
     config = get_config(db, channel_id)
@@ -209,10 +217,13 @@ def send_test_message(db: Client, channel_id: str, kind: str) -> str:
     channel_doc = db.collection("channel_index").document(channel_id).get()
     channel_name = (channel_doc.to_dict() or {}).get("name", "")  # type: ignore[union-attr]
     context = {
-        "title": "這是一則測試通知",
+        "title": TEST_TITLE,
         "url": f"https://www.youtube.com/channel/{channel_id}",
         "channel": channel_name,
         "type": LABEL_LIVE if kind == KIND_LIVE else LABEL_VIDEO,
     }
-    content, allowed_mentions = render_message(kind_config, config["guild_id"], context)
-    return send_message(kind_config["discord_channel_id"], content, allowed_mentions)
+    content, _ = render_message(kind_config, config["guild_id"], context)
+    # 開頭標明是測試，避免成員誤以為真的開台或上片。tag 只顯示文字，不實際提醒
+    return send_message(
+        kind_config["discord_channel_id"], f"{TEST_NOTICE[kind]}\n{content}", {"parse": []}
+    )

@@ -17,6 +17,7 @@ from services.discord_notify.processor import (
     SENT_COLLECTION,
     enqueue_video,
     run_tick,
+    send_test_message,
 )
 from utils.exceptions import ExternalServiceError
 
@@ -224,3 +225,22 @@ class TestSendFailure:
             run_tick(configured, NOW)
 
         assert not _exists(configured, QUEUE_COLLECTION, "vid1")
+
+
+class TestSendTestMessage:
+    def test_marks_message_as_test_and_does_not_ping(self, configured, mock_send):
+        send_test_message(configured, CHANNEL, "live")
+
+        channel_id, content, mentions = mock_send.call_args.args
+        assert channel_id == "LIVE_CH"
+        assert content.startswith("🔧 **這是測試訊息**")
+        assert "並沒有真的開台" in content
+        assert "（範例標題）" in content
+        # 有設定身分組時只顯示文字，不實際提醒
+        assert "<@&7>" in content
+        assert mentions == {"parse": []}
+
+    def test_video_notice(self, configured, mock_send):
+        send_test_message(configured, CHANNEL, "video")
+
+        assert "並沒有發布新影片" in mock_send.call_args.args[1]
