@@ -29,6 +29,7 @@ VTMap 是一套針對 Vtuber 頻道經營的分析與導流工具，解決 YouTu
 - 開關頻道分析頁與導流頁的觀看權限
 - 設定自訂的主題分類關鍵字
 - 透過 Google Sheets 表單協作擴充遊戲別名清單
+- Discord 開台與新影片通知：直播與影片分頻道發送，可自訂訊息模板（目前僅管理員可用）
 
 ### 趨勢分析
 
@@ -122,6 +123,7 @@ Browser --> Firebase Hosting (React SPA)
 | Cloud Tasks | `CLOUD_TASKS_LOCATION`, `CLOUD_TASKS_QUEUE`, `CLOUD_RUN_SERVICE_URL` | 非同步作業 |
 | 遊戲別名 | `GAME_ALIAS_ENDPOINT` | 外部遊戲別名 API |
 | 綠界金流 | `ECPAY_MERCHANT_ID`, `ECPAY_HASH_KEY`, `ECPAY_HASH_IV` | 選填，僅贊助功能需要 |
+| Discord 通知 | `DISCORD_BOT_TOKEN`, `DISCORD_PUBLIC_KEY`, `DISCORD_GUILD_ID` | 選填，開台與新影片通知機器人 |
 
 `.env.production` 覆蓋正式部署的網址與導向參數。
 
